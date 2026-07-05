@@ -86,6 +86,57 @@ class PersonUpdate(BaseModel):
     notes: str | None = None
 
 
+class LdapLoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class LocalAuthConfig(BaseModel):
+    enabled: bool = True
+    password_min_length: int = 8
+    password_require_uppercase: bool = False
+    password_require_lowercase: bool = False
+    password_require_digit: bool = False
+    password_require_special: bool = False
+
+
+class OidcAuthConfig(BaseModel):
+    enabled: bool = False
+    issuer: str = ""
+    client_id: str = ""
+    # Empty means "keep the stored secret".
+    client_secret: str = ""
+    scopes: str = "openid profile email"
+    provider_name: str = "SSO"
+    default_role: str = "Viewer"
+    auto_create_users: bool = True
+
+
+class LdapAuthConfig(BaseModel):
+    enabled: bool = False
+    server_url: str = ""
+    user_dn_template: str = ""
+    bind_dn: str = ""
+    # Empty means "keep the stored password".
+    bind_password: str = ""
+    search_base: str = ""
+    user_filter: str = "(|(uid={username})(sAMAccountName={username})(mail={username}))"
+    email_attribute: str = "mail"
+    name_attribute: str = "cn"
+    default_role: str = "Viewer"
+
+
+class AuthConfigUpdate(BaseModel):
+    local: LocalAuthConfig | None = None
+    oidc: OidcAuthConfig | None = None
+    ldap: LdapAuthConfig | None = None
+
+
+class PersonImportRequest(BaseModel):
+    persons: list[PersonCreate]
+    mode: Literal["create", "upsert"] = "create"
+
+
 class EmbeddingFromPathRequest(BaseModel):
     path: str
 

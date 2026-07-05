@@ -175,8 +175,35 @@ async def recognize(payload: RecognitionRequest):
     return {"known": False, "threshold": threshold, "similarity": float(row["similarity"]) if row else None}
 
 
+async def get_setting_str(key: str, default: str) -> str:
+    row = await fetchrow("SELECT value FROM settings WHERE key = $1", key)
+    return row["value"] if row else default
+
+
+async def within_detection_schedule() -> bool:
+    """False only when scheduling is enabled and the current server time is outside it."""
+    if (await get_setting_str("schedule.enabled", "false")).lower() not in ("1", "true", "yes"):
+        return True
+    now = datetime.now()
+    days = [d.strip().lower() for d in (await get_setting_str("schedule.days", "")).split(",") if d.strip()]
+    if days and now.strftime("%a").lower()[:3] not in days:
+        return False
+    try:
+        start = datetime.strptime(await get_setting_str("schedule.start_time", "00:00"), "%H:%M").time()
+        end = datetime.strptime(await get_setting_str("schedule.end_time", "23:59"), "%H:%M").time()
+    except ValueError:
+        return True
+    current = now.time()
+    if start <= end:
+        return start <= current <= end
+    # Overnight window, e.g. 20:00 -> 06:00.
+    return current >= start or current <= end
+
+
 @router.post("/internal/detection-events", dependencies=[Depends(verify_internal_key)])
 async def create_detection_event(payload: DetectionEventCreate):
+    if not await within_detection_schedule():
+        return {"skipped": "outside_schedule"}
     row = await fetchrow(
         """
         INSERT INTO detection_events (

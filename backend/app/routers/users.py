@@ -1,12 +1,20 @@
 from fastapi import APIRouter, Depends, HTTPException
 
 from ..audit import write_audit
+from ..auth_config import get_auth_config, validate_password
 from ..db import execute, fetch, fetchrow
 from ..schemas import UserCreate, UserUpdate
 from ..security import hash_password, require_roles
 from ..utils import rows_to_dicts, to_jsonable
 
 router = APIRouter(prefix="/users", tags=["users"])
+
+
+async def _enforce_password_rules(password: str) -> None:
+    rules = (await get_auth_config())["local"]
+    problems = validate_password(password, rules)
+    if problems:
+        raise HTTPException(status_code=400, detail=f"Password must {', '.join(problems)}")
 
 
 @router.get("")
@@ -24,6 +32,7 @@ async def list_users(user=Depends(require_roles("Admin"))):
 
 @router.post("")
 async def create_user(payload: UserCreate, user=Depends(require_roles("Admin"))):
+    await _enforce_password_rules(payload.password)
     role = await fetchrow("SELECT id FROM roles WHERE name = $1", payload.role)
     if role is None:
         raise HTTPException(status_code=400, detail="Role not found")
@@ -56,6 +65,7 @@ async def update_user(user_id: str, payload: UserUpdate, user=Depends(require_ro
     if payload.is_active is not None:
         await execute("UPDATE users SET is_active = $1, updated_at = now() WHERE id = $2::uuid", payload.is_active, user_id)
     if payload.password:
+        await _enforce_password_rules(payload.password)
         await execute("UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2::uuid", hash_password(payload.password), user_id)
     if payload.role:
         role = await fetchrow("SELECT id FROM roles WHERE name = $1", payload.role)

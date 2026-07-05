@@ -1,6 +1,6 @@
 # Docker deployment
 
-This folder contains production-style Docker deployment files for the Vision AI System MVP.
+This folder contains production-style Docker deployment files for the KNetraAI MVP.
 
 ## Files
 
@@ -84,7 +84,7 @@ sh docker/scripts/backup-postgres.sh
 Restore PostgreSQL:
 
 ```bash
-sh docker/scripts/restore-postgres.sh backups/vision-ai-postgres-YYYYMMDD-HHMMSS.sql.gz
+sh docker/scripts/restore-postgres.sh backups/knetraai-postgres-YYYYMMDD-HHMMSS.sql.gz
 ```
 
 ## RTSP camera notes

@@ -1,7 +1,7 @@
 services:
   postgres:
     image: pgvector/pgvector:pg17
-    container_name: vision-ai-postgres
+    container_name: knetraai-postgres
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-vision_ai}
@@ -19,15 +19,15 @@ services:
       retries: 10
 
   redis:
-    image: redis:7-alpine
-    container_name: vision-ai-redis
+    image: redis:8-alpine
+    container_name: knetraai-redis
     restart: unless-stopped
     ports:
       - "6379:6379"
 
   backend:
     build: ./backend
-    container_name: vision-ai-backend
+    container_name: knetraai-backend
     restart: unless-stopped
     env_file: .env
     environment:
@@ -46,7 +46,7 @@ services:
 
   ai-service:
     build: ./ai-service
-    container_name: vision-ai-service
+    container_name: knetraai-service
     restart: unless-stopped
     env_file: .env
     environment:
@@ -62,7 +62,7 @@ services:
 
   frontend:
     build: ./frontend
-    container_name: vision-ai-frontend
+    container_name: knetraai-frontend
     restart: unless-stopped
     environment:
       NUXT_PUBLIC_API_BASE_URL: ${NUXT_PUBLIC_API_BASE_URL:-http://localhost:8000}

@@ -1,17 +1,20 @@
 from __future__ import annotations
 
+import csv
+import io
 import re
 from pathlib import Path
 from uuid import uuid4
 
 import aiofiles
 import httpx
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from pydantic import ValidationError
 
 from ..audit import write_audit
 from ..config import settings
 from ..db import execute, fetch, fetchrow
-from ..schemas import PersonCreate, PersonUpdate
+from ..schemas import PersonCreate, PersonImportRequest, PersonUpdate
 from ..security import require_roles
 from ..utils import rows_to_dicts, to_jsonable, vector_literal
 
@@ -58,6 +61,135 @@ async def create_person(payload: PersonCreate, user=Depends(require_roles("Admin
     )
     await write_audit(user, "person.create", "person", str(row["id"]), {"person_type": payload.person_type})
     return to_jsonable(row)
+
+
+CSV_COLUMNS = [
+    "person_type", "full_name", "gender", "branch", "status", "staff_id",
+    "department", "position", "customer_id", "customer_type", "vip_flag",
+    "notes", "consent_confirmed",
+]
+
+_TRUTHY = {"1", "true", "yes", "y"}
+
+
+async def _insert_person(payload: PersonCreate):
+    consent_at_expr = "now()" if payload.consent_confirmed else "NULL"
+    return await fetchrow(
+        f"""
+        INSERT INTO persons (
+            person_type, full_name, gender, branch, status, staff_id, department, position,
+            customer_id, customer_type, vip_flag, consent_at, notes
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, {consent_at_expr}, $12)
+        RETURNING *
+        """,
+        payload.person_type,
+        payload.full_name,
+        payload.gender,
+        payload.branch,
+        payload.status,
+        payload.staff_id,
+        payload.department,
+        payload.position,
+        payload.customer_id,
+        payload.customer_type,
+        payload.vip_flag,
+        payload.notes,
+    )
+
+
+async def _find_existing(payload: PersonCreate):
+    """Match on the external identifier so re-imports sync instead of duplicating."""
+    if payload.person_type == "staff" and payload.staff_id:
+        return await fetchrow(
+            "SELECT * FROM persons WHERE person_type = 'staff' AND staff_id = $1", payload.staff_id
+        )
+    if payload.person_type == "customer" and payload.customer_id:
+        return await fetchrow(
+            "SELECT * FROM persons WHERE person_type = 'customer' AND customer_id = $1", payload.customer_id
+        )
+    return None
+
+
+async def _import_persons(items: list[dict], mode: str, user) -> dict:
+    created = updated = skipped = 0
+    errors: list[dict] = []
+    for index, item in enumerate(items, start=1):
+        try:
+            payload = PersonCreate(**item)
+        except ValidationError as exc:
+            first = exc.errors()[0]
+            errors.append({"row": index, "error": f"{'.'.join(str(p) for p in first['loc'])}: {first['msg']}"})
+            continue
+        existing = await _find_existing(payload)
+        if existing is None:
+            await _insert_person(payload)
+            created += 1
+        elif mode == "upsert":
+            await execute(
+                """
+                UPDATE persons
+                SET full_name = $1, gender = $2, branch = $3, status = $4, department = $5,
+                    position = $6, customer_type = $7, vip_flag = $8, notes = $9, updated_at = now()
+                WHERE id = $10
+                """,
+                payload.full_name,
+                payload.gender,
+                payload.branch,
+                payload.status,
+                payload.department,
+                payload.position,
+                payload.customer_type,
+                payload.vip_flag,
+                payload.notes,
+                existing["id"],
+            )
+            updated += 1
+        else:
+            skipped += 1
+            errors.append({"row": index, "error": "Duplicate staff_id/customer_id (use sync mode to update)"})
+    summary = {"created": created, "updated": updated, "skipped": skipped, "errors": errors}
+    await write_audit(user, "person.import", "person", None, summary | {"mode": mode})
+    return summary
+
+
+def _rows_from_csv(raw: bytes) -> list[dict]:
+    text = raw.decode("utf-8-sig", errors="replace")
+    reader = csv.DictReader(io.StringIO(text))
+    if not reader.fieldnames:
+        raise HTTPException(status_code=400, detail="CSV file is empty")
+    unknown = [c for c in reader.fieldnames if c.strip() and c.strip() not in CSV_COLUMNS]
+    if "full_name" not in [c.strip() for c in reader.fieldnames]:
+        raise HTTPException(status_code=400, detail="CSV must have a full_name column")
+    if unknown:
+        raise HTTPException(status_code=400, detail=f"Unknown CSV columns: {', '.join(unknown)}")
+    items = []
+    for row in reader:
+        item = {k.strip(): (v.strip() if isinstance(v, str) else v) for k, v in row.items() if k}
+        item = {k: v for k, v in item.items() if v not in (None, "")}
+        for flag in ("vip_flag", "consent_confirmed"):
+            if flag in item:
+                item[flag] = str(item[flag]).lower() in _TRUTHY
+        items.append(item)
+    if not items:
+        raise HTTPException(status_code=400, detail="CSV contains no data rows")
+    return items
+
+
+@router.post("/import")
+async def import_persons_csv(
+    file: UploadFile = File(...),
+    mode: str = Form("create"),
+    user=Depends(require_roles("Admin", "Manager")),
+):
+    if mode not in ("create", "upsert"):
+        raise HTTPException(status_code=400, detail="mode must be 'create' or 'upsert'")
+    items = _rows_from_csv(await file.read())
+    return await _import_persons(items, mode, user)
+
+
+@router.post("/import-json")
+async def import_persons_json(payload: PersonImportRequest, user=Depends(require_roles("Admin", "Manager"))):
+    return await _import_persons([p.model_dump() for p in payload.persons], payload.mode, user)
 
 
 @router.get("/{person_id}")

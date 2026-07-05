@@ -1,6 +1,11 @@
 <template>
   <div>
-    <h1 class="page-title">Dashboard</h1>
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Dashboard</h1>
+        <p class="page-subtitle">Today's walk-in activity and camera status at a glance.</p>
+      </div>
+    </div>
     <div class="grid-cards">
       <StatCard label="Events Today" :value="stats.events_today" />
       <StatCard label="Staff Today" :value="stats.staff_today" />
@@ -9,21 +14,24 @@
       <StatCard label="Running Cameras" :value="`${stats.camera_running || 0}/${stats.camera_total || 0}`" />
     </div>
 
-    <section class="card" style="margin-top: 1rem;">
-      <h2 style="font-size: 1.15rem; font-weight: 800; margin-bottom: 1rem;">Realtime Walk-in Events</h2>
-      <table class="table">
-        <thead><tr><th>Time</th><th>Camera</th><th>Person</th><th>Type</th><th>Greeting</th><th>Confidence</th></tr></thead>
-        <tbody>
-          <tr v-for="event in events" :key="event.id">
-            <td>{{ formatDate(event.detected_at) }}</td>
-            <td>{{ event.camera_name || '-' }}</td>
-            <td>{{ event.person_name || 'Unknown' }}</td>
-            <td><span class="badge">{{ event.person_type }}</span></td>
-            <td>{{ event.greeting }}</td>
-            <td>{{ event.confidence ? Number(event.confidence).toFixed(3) : '-' }}</td>
-          </tr>
-        </tbody>
-      </table>
+    <section class="card" style="margin-top: 1.25rem;">
+      <h2 class="card-title">Realtime Walk-in Events</h2>
+      <div class="table-wrap" style="box-shadow: none;">
+        <table class="table">
+          <thead><tr><th>Time</th><th>Camera</th><th>Person</th><th>Type</th><th>Greeting</th><th>Confidence</th></tr></thead>
+          <tbody>
+            <tr v-if="!events.length"><td colspan="6" class="empty-row">No detection events yet. Start a camera to begin monitoring.</td></tr>
+            <tr v-for="event in events" :key="event.id">
+              <td style="white-space: nowrap;">{{ formatDate(event.detected_at) }}</td>
+              <td>{{ event.camera_name || '-' }}</td>
+              <td>{{ event.person_name || 'Unknown' }}</td>
+              <td><span class="badge" :class="typeClass(event.person_type)">{{ event.person_type }}</span></td>
+              <td class="truncate" :title="event.greeting">{{ event.greeting }}</td>
+              <td>{{ event.confidence ? Number(event.confidence).toFixed(3) : '-' }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </section>
   </div>
 </template>
@@ -40,6 +48,7 @@ const load = async () => {
 }
 
 const formatDate = (value: string) => value ? new Date(value).toLocaleString() : '-'
+const typeClass = (type: string) => type === 'staff' ? 'info' : type === 'customer' ? 'success' : 'warning'
 
 onMounted(async () => {
   await load()

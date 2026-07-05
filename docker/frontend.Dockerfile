@@ -1,4 +1,4 @@
-FROM node:22-alpine AS deps
+FROM node:24-alpine AS deps
 WORKDIR /app
 COPY frontend/package*.json ./
 RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
@@ -8,7 +8,7 @@ WORKDIR /app
 COPY frontend/ ./
 RUN npm run build
 
-FROM node:22-alpine AS runner
+FROM node:24-alpine AS runner
 ENV NODE_ENV=production \
     NITRO_HOST=0.0.0.0 \
     NITRO_PORT=3000

@@ -10,9 +10,14 @@
 | Camera delete | yes | no | no | no |
 | Person list/view | yes | yes | yes | yes |
 | Person create/update | yes | yes | yes | no |
+| Person bulk import/sync | yes | yes | no | no |
 | Person delete | yes | yes | no | no |
 | Face image upload | yes | yes | yes | no |
 | AI/settings update | yes | no | no | no |
+| Appearance (logo/colors) | yes | no | no | no |
+| Authentication config (local rules/OIDC/LDAP) | yes | no | no | no |
+| Detection schedule update | yes | no | no | no |
+| AI provider status view | yes | yes | no | no |
 | Greeting template update | yes | yes | no | no |
 | User management | yes | no | no | no |
 | Audit logs | yes | no | no | no |

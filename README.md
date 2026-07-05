@@ -1,15 +1,19 @@
-# Vision AI System - Walk-in Greeting AI MVP
+# KNetraAI - Walk-in Greeting AI MVP
 
-This repository is a clean MVP scaffold for a CCTV-connected Vision AI System. The first module is **Walk-in Greeting AI**:
+KNetraAI ("netra" = eye) is a CCTV-connected Vision AI system. The first module is **Walk-in Greeting AI**:
 
-- Connect RTSP/IP cameras.
+- Connect RTSP/IP cameras (guided setup for Hikvision, EZVIZ, Dahua, Tapo, and more).
 - Detect faces from live video.
-- Register staff and customers with face photos.
+- Register staff and customers with face photos, CSV import, or HR/CRM API sync.
 - Generate 512-dimensional embeddings.
 - Search embeddings with PostgreSQL + pgvector.
 - Greet known people by name.
 - Greet unknown people as sir, madam, or neutral when gender confidence is low.
 - Save detection events and push live dashboard updates by SSE.
+- Optional detection schedule (record events only during configured hours/days).
+- Sign in with local accounts, OIDC single sign-on (Keycloak, Authentik, ...), or LDAP/Active Directory.
+- Admin-configurable appearance: app name, logo, primary/secondary colors (default primary: dodgerblue).
+- PWA-ready branding: web manifest plus a full icon set generated from the KNetraAI logo.
 
 The project is intentionally modular so more vision modules can be added later, such as PPE detection, queue counting, intrusion alerts, attendance, people counting, and license plate recognition.
 
@@ -32,8 +36,8 @@ These screenshots show the MVP admin console with seeded demo data. Full-size im
 ## Documentation
 
 - [User Manual and Configuration Guide](docs/user-manual-and-configuration.md)
-- [Editable DOCX Manual](docs/Vision_AI_System_User_Manual_and_Configuration_Guide.docx)
-- [PDF Manual](docs/Vision_AI_System_User_Manual_and_Configuration_Guide.pdf)
+- [Editable DOCX Manual](docs/Vision_AI_System_User_Manual_and_Configuration_Guide.docx) (older snapshot; the Markdown manual is current)
+- [PDF Manual](docs/Vision_AI_System_User_Manual_and_Configuration_Guide.pdf) (older snapshot; the Markdown manual is current)
 - [Architecture](docs/architecture.md)
 - [API Overview](docs/api-overview.md)
 - [Role Permission Matrix](docs/role-permission-matrix.md)
@@ -152,7 +156,13 @@ JWT_SECRET=change-this-in-production
 RECOGNITION_THRESHOLD=0.45
 GREETING_COOLDOWN_SECONDS=300
 NUXT_PUBLIC_API_BASE_URL=http://localhost:8000
+
+# Optional single sign-on and directory login (see Settings -> Authentication in the app)
+OIDC_ENABLED=false        # Keycloak, Authentik, or any OpenID Connect provider
+LDAP_ENABLED=false        # LDAP / Active Directory
 ```
+
+The full OIDC/LDAP variable reference is in `.env.example`, and the in-app **Settings → Authentication** page has step-by-step Keycloak and Authentik guides.
 
 ## Important privacy notes
 

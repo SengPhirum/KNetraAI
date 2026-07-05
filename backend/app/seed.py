@@ -35,6 +35,14 @@ async def seed_data() -> None:
         ("recognition_threshold", str(settings.recognition_threshold), "Minimum cosine similarity required to accept a face match"),
         ("greeting_cooldown_seconds", str(settings.greeting_cooldown_seconds), "Cooldown before greeting the same person again"),
         ("gender_min_confidence", str(settings.gender_min_confidence), "Minimum confidence for sir/madam unknown greeting"),
+        ("appearance.app_name", "KNetraAI", "Application display name shown in the sidebar and login page"),
+        ("appearance.logo_url", "", "Custom logo file path (upload via Settings -> Appearance; empty = built-in logo)"),
+        ("appearance.primary_color", "#1E90FF", "Primary UI color for buttons and accents"),
+        ("appearance.secondary_color", "#0f172a", "Secondary UI color for the sidebar and dark surfaces"),
+        ("schedule.enabled", "false", "Restrict detection event recording to the schedule below"),
+        ("schedule.start_time", "08:00", "Daily schedule start (HH:MM, server time)"),
+        ("schedule.end_time", "20:00", "Daily schedule end (HH:MM, server time)"),
+        ("schedule.days", "mon,tue,wed,thu,fri,sat,sun", "Comma-separated days when detection events are recorded"),
     ]
     for key, value, description in defaults:
         await execute(

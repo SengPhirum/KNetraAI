@@ -1,12 +1,12 @@
-fastapi>=0.115
-uvicorn[standard]>=0.30
-pydantic>=2.7
-pydantic-settings>=2.3
-httpx>=0.27
-numpy>=1.26
+fastapi>=0.139
+uvicorn[standard]>=0.50
+pydantic>=2.13
+pydantic-settings>=2.14
+httpx>=0.28
+numpy>=2.5
 # OpenCV 5.x removed the legacy Haar CascadeClassifier used by the dev provider.
-opencv-python-headless>=4.10,<5
-python-multipart>=0.0.9
+opencv-python-headless>=4.13,<5
+python-multipart>=0.0.32
 # Production deep-learning provider. Uncomment for real InsightFace embeddings.
 # insightface>=0.7.3
 # onnxruntime>=1.18

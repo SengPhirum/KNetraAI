@@ -3,7 +3,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    service_name: str = "Vision AI Inference Service"
+    service_name: str = "KNetraAI Inference Service"
     backend_url: str = "http://localhost:8000"
     internal_api_key: str = "change-this-internal-key"
     storage_dir: str = "/data"

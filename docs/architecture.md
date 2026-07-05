@@ -15,8 +15,14 @@ RTSP camera -> frame capture -> face detection -> alignment/embedding -> backend
 
 ## Security model
 
-- JWT authentication for users.
+- JWT authentication for users; three login methods: local password, OIDC single sign-on (Keycloak/Authentik/any OpenID Connect provider), and LDAP / Active Directory. OIDC and LDAP users are provisioned just-in-time with a configurable default role.
 - Internal API key between backend and AI service.
 - Roles: Admin, Manager, Operator, Viewer.
-- Audit logs for create/update/delete/start/stop actions.
+- Audit logs for create/update/delete/start/stop/import/provision actions.
 - Face files are served locally for MVP only. Use private storage or signed URLs in production.
+
+## Runtime configuration
+
+- Settings table drives AI thresholds, greeting templates, appearance (app name, logo, primary/secondary colors), and the detection schedule.
+- The detection schedule is enforced at the backend event-ingest endpoint; outside the window, camera workers keep running but events are not recorded.
+- Appearance is exposed on a public endpoint so the login page is branded before authentication; the frontend applies colors as CSS variables at load.

@@ -1,6 +1,12 @@
 <template>
   <div>
-    <h1 class="page-title">Add Person</h1>
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Add Person</h1>
+        <p class="page-subtitle">Register a staff member or customer before enrolling face images.</p>
+      </div>
+      <NuxtLink class="btn secondary" to="/persons">Back</NuxtLink>
+    </div>
     <div class="card">
       <form class="form-grid" @submit.prevent="save">
         <div><label class="label">Type</label><select v-model="form.person_type"><option value="staff">Staff</option><option value="customer">Customer</option></select></div>
@@ -12,10 +18,12 @@
         <div><label class="label">Position</label><input v-model="form.position" class="input" /></div>
         <div><label class="label">Customer ID</label><input v-model="form.customer_id" class="input" /></div>
         <div><label class="label">Customer Type</label><input v-model="form.customer_type" class="input" /></div>
-        <div><label><input v-model="form.vip_flag" type="checkbox" /> VIP Customer</label></div>
-        <div><label><input v-model="form.consent_confirmed" type="checkbox" /> Consent confirmed for biometric registration</label></div>
-        <div style="grid-column: 1 / -1;"><label class="label">Notes</label><textarea v-model="form.notes" class="input"></textarea></div>
-        <button class="btn" type="submit">Create</button>
+        <div class="full-row"><label class="label">Notes</label><textarea v-model="form.notes" class="input"></textarea></div>
+        <div class="full-row">
+          <label class="checkbox-label"><input v-model="form.vip_flag" type="checkbox" /> VIP Customer</label>
+          <label class="checkbox-label"><input v-model="form.consent_confirmed" type="checkbox" /> Consent confirmed for biometric registration</label>
+        </div>
+        <div><button class="btn" type="submit">Create</button></div>
       </form>
       <p v-if="error" class="error">{{ error }}</p>
     </div>
