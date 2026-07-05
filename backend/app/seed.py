@@ -1,0 +1,57 @@
+from .config import settings
+from .db import execute, fetchrow
+from .security import hash_password
+
+
+async def seed_data() -> None:
+    roles = [
+        ("Admin", "Full access"),
+        ("Manager", "Dashboard, reports, and staff/customer profiles"),
+        ("Operator", "Live monitoring and limited registration"),
+        ("Viewer", "Read-only dashboard and reports"),
+    ]
+    for name, description in roles:
+        await execute(
+            "INSERT INTO roles (name, description) VALUES ($1, $2) ON CONFLICT (name) DO NOTHING",
+            name,
+            description,
+        )
+
+    admin_role = await fetchrow("SELECT id FROM roles WHERE name = 'Admin'")
+    admin = await fetchrow("SELECT id FROM users WHERE lower(email) = lower($1)", settings.default_admin_email)
+    if admin is None:
+        await execute(
+            """
+            INSERT INTO users (email, full_name, password_hash, role_id)
+            VALUES ($1, $2, $3, $4)
+            """,
+            settings.default_admin_email,
+            settings.default_admin_name,
+            hash_password(settings.default_admin_password),
+            admin_role["id"] if admin_role else None,
+        )
+
+    defaults = [
+        ("recognition_threshold", str(settings.recognition_threshold), "Minimum cosine similarity required to accept a face match"),
+        ("greeting_cooldown_seconds", str(settings.greeting_cooldown_seconds), "Cooldown before greeting the same person again"),
+        ("gender_min_confidence", str(settings.gender_min_confidence), "Minimum confidence for sir/madam unknown greeting"),
+    ]
+    for key, value, description in defaults:
+        await execute(
+            """
+            INSERT INTO settings (key, value, description)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (key) DO NOTHING
+            """,
+            key,
+            value,
+            description,
+        )
+
+    await execute(
+        """
+        INSERT INTO greeting_templates (language, known_template, male_template, female_template, neutral_template)
+        VALUES ('en', 'Welcome back, {name}', 'Hello sir', 'Hello madam', 'Hello, welcome')
+        ON CONFLICT (language) DO NOTHING
+        """
+    )

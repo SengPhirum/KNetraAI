@@ -1,0 +1,12 @@
+.env
+storage/*
+!storage/.gitkeep
+**/__pycache__/
+**/.pytest_cache/
+**/.venv/
+frontend/.nuxt/
+frontend/.output/
+frontend/node_modules/
+*.pyc
+*.log
+.DS_Store

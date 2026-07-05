@@ -1,0 +1,154 @@
+name: vision-ai-system
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: vision-ai-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-vision_ai}
+      POSTGRES_USER: ${POSTGRES_USER:-vision}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-vision}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ../database/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER:-vision}\" -d \"$${POSTGRES_DB:-vision_ai}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - private
+
+  redis:
+    image: redis:7-alpine
+    container_name: vision-ai-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - private
+
+  backend:
+    image: vision-ai-backend:${VISION_AI_TAG:-latest}
+    container_name: vision-ai-backend
+    build:
+      context: ..
+      dockerfile: docker/backend.Dockerfile
+    restart: unless-stopped
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-vision}:${POSTGRES_PASSWORD:-vision}@postgres:5432/${POSTGRES_DB:-vision_ai}
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: ${JWT_SECRET:-change-this-jwt-secret}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      ACCESS_TOKEN_MINUTES: ${ACCESS_TOKEN_MINUTES:-720}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:-change-this-internal-key}
+      DEFAULT_ADMIN_EMAIL: ${DEFAULT_ADMIN_EMAIL:-admin@example.com}
+      DEFAULT_ADMIN_PASSWORD: ${DEFAULT_ADMIN_PASSWORD:-admin123}
+      DEFAULT_ADMIN_NAME: ${DEFAULT_ADMIN_NAME:-System Admin}
+      AI_SERVICE_URL: http://ai-service:8001
+      RECOGNITION_THRESHOLD: ${RECOGNITION_THRESHOLD:-0.45}
+      GREETING_COOLDOWN_SECONDS: ${GREETING_COOLDOWN_SECONDS:-300}
+      GENDER_MIN_CONFIDENCE: ${GENDER_MIN_CONFIDENCE:-0.60}
+      STORAGE_DIR: /data
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost,http://127.0.0.1,http://localhost:3000,http://127.0.0.1:3000}
+      TZ: ${TZ:-Asia/Phnom_Penh}
+    volumes:
+      - storage_data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - private
+
+  ai-service:
+    image: vision-ai-service:${VISION_AI_TAG:-latest}
+    container_name: vision-ai-service
+    build:
+      context: ..
+      dockerfile: docker/ai-service.Dockerfile
+    restart: unless-stopped
+    environment:
+      BACKEND_URL: http://backend:8000
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY:-change-this-internal-key}
+      STORAGE_DIR: /data
+      AI_PROVIDER: ${AI_PROVIDER:-opencv_mock}
+      PROCESS_FPS: ${PROCESS_FPS:-2}
+      GREETING_COOLDOWN_SECONDS: ${GREETING_COOLDOWN_SECONDS:-300}
+      GENDER_MIN_CONFIDENCE: ${GENDER_MIN_CONFIDENCE:-0.60}
+      SNAPSHOT_JPEG_QUALITY: ${SNAPSHOT_JPEG_QUALITY:-85}
+      INSIGHTFACE_MODEL: ${INSIGHTFACE_MODEL:-buffalo_l}
+      ALLOW_PROVIDER_FALLBACK: ${ALLOW_PROVIDER_FALLBACK:-true}
+      TZ: ${TZ:-Asia/Phnom_Penh}
+    volumes:
+      - storage_data:/data
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - private
+
+  frontend:
+    image: vision-ai-frontend:${VISION_AI_TAG:-latest}
+    container_name: vision-ai-frontend
+    build:
+      context: ..
+      dockerfile: docker/frontend.Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      NITRO_HOST: 0.0.0.0
+      NITRO_PORT: 3000
+      NUXT_PUBLIC_API_BASE_URL: ${NUXT_PUBLIC_API_BASE_URL:-/api}
+      TZ: ${TZ:-Asia/Phnom_Penh}
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - private
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: vision-ai-nginx
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT:-80}:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      frontend:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    networks:
+      - public
+      - private
+
+networks:
+  public:
+    name: vision-ai-public
+  private:
+    name: vision-ai-private
+    internal: false
+
+volumes:
+  postgres_data:
+    name: vision-ai-postgres-data
+  redis_data:
+    name: vision-ai-redis-data
+  storage_data:
+    name: vision-ai-storage-data

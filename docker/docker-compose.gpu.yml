@@ -1,0 +1,14 @@
+# Optional override for NVIDIA GPU inference hosts.
+# Usage:
+# docker compose --env-file docker/.env.production -f docker/docker-compose.yml -f docker/docker-compose.gpu.yml up -d --build
+services:
+  ai-service:
+    environment:
+      AI_PROVIDER: ${AI_PROVIDER:-insightface}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
