@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS cameras (
     location TEXT,
     rtsp_url TEXT NOT NULL,
     enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    ai_enabled BOOLEAN NOT NULL DEFAULT FALSE,
     status TEXT NOT NULL DEFAULT 'stopped',
     last_seen_at TIMESTAMPTZ,
     source TEXT NOT NULL DEFAULT 'manual' CHECK (source IN ('manual', 'onvif')),

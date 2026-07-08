@@ -6,7 +6,7 @@
 
     <span v-if="src && !errored" class="live-dot">LIVE</span>
     <button v-if="src" class="fullscreen-btn" type="button" :title="isFullscreen ? 'Exit fullscreen' : 'Fullscreen'" @click.stop="toggleFullscreen">
-      {{ isFullscreen ? '⤡' : '⤢' }}
+      {{ isFullscreen ? 'Exit' : 'Full' }}
     </button>
   </div>
 </template>
@@ -105,7 +105,7 @@ watch(() => props.src, () => {
   font-weight: 700;
   padding: 0.15rem 0.5rem;
   border-radius: 999px;
-  letter-spacing: 0.05em;
+  letter-spacing: 0;
 }
 
 .fullscreen-btn {
@@ -116,8 +116,9 @@ watch(() => props.src, () => {
   color: white;
   border: 0;
   border-radius: 0.4rem;
-  width: 1.8rem;
+  min-width: 2.7rem;
   height: 1.8rem;
+  padding: 0 0.45rem;
   display: grid;
   place-items: center;
   cursor: pointer;

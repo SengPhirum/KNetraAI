@@ -41,11 +41,27 @@ class InsightFaceProvider:
             metadata={"provider": self.model_version},
         )
 
+    def _is_valid_face(self, face, frame_shape) -> bool:
+        score = float(getattr(face, "det_score", 0.0))
+        if score < settings.face_min_confidence:
+            return False
+        frame_h, frame_w = frame_shape[:2]
+        bx = face.bbox
+        width = max(0.0, float(bx[2] - bx[0]))
+        height = max(0.0, float(bx[3] - bx[1]))
+        if width <= 0 or height <= 0:
+            return False
+        area_ratio = (width * height) / max(1.0, float(frame_w * frame_h))
+        if area_ratio < settings.face_min_area_ratio or area_ratio > settings.face_max_area_ratio:
+            return False
+        aspect_ratio = width / max(1.0, height)
+        return 0.65 <= aspect_ratio <= 1.45
+
     def embed_image(self, path: str) -> EmbeddingResult:
         image = cv2.imread(path)
         if image is None:
             raise ValueError(f"Could not read image: {path}")
-        faces = self.app.get(image)
+        faces = [face for face in self.app.get(image) if self._is_valid_face(face, image.shape)]
         if not faces:
             raise ValueError("No face found in image")
         largest = max(faces, key=lambda f: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]))
@@ -62,4 +78,4 @@ class InsightFaceProvider:
         )
 
     def detect_and_embed(self, frame: np.ndarray) -> list[FaceResult]:
-        return [self._face_to_result(face) for face in self.app.get(frame)]
+        return [self._face_to_result(face) for face in self.app.get(frame) if self._is_valid_face(face, frame.shape)]

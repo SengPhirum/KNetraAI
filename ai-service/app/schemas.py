@@ -10,6 +10,11 @@ class CameraStartRequest(BaseModel):
     rtsp_url: str
     branch: str | None = None
     location: str | None = None
+    ai_enabled: bool = False
+
+
+class CameraAiModeRequest(BaseModel):
+    enabled: bool
 
 
 class EmbeddingFromPathRequest(BaseModel):

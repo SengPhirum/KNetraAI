@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import quote, unquote, urlsplit
 
 import cv2
 
@@ -51,7 +51,7 @@ async def scan_network(timeout: float | None = None) -> list[dict[str, Any]]:
                         "port": parsed.port or 80,
                         "xaddrs": xaddrs,
                         "scopes": scopes,
-                        "hint": _guess_name(scopes),
+                        **_scope_details(scopes),
                     }
                 )
             return results
@@ -76,12 +76,25 @@ def _is_unreachable(exc: Exception) -> bool:
     return isinstance(exc, (OSError, asyncio.TimeoutError))
 
 
-def _guess_name(scopes: list[str]) -> str | None:
+def _scope_tail(scope: str) -> str:
+    return unquote(scope.rstrip("/").rsplit("/", 1)[-1]).strip()
+
+
+def _scope_details(scopes: list[str]) -> dict[str, Any]:
+    details: dict[str, Any] = {"name": None, "hardware": None, "location": None, "types": []}
     for scope in scopes:
         lowered = scope.lower()
-        if "hardware" in lowered or "/name/" in lowered:
-            return scope.rsplit("/", 1)[-1]
-    return None
+        if "/name/" in lowered and not details["name"]:
+            details["name"] = _scope_tail(scope)
+        elif "/hardware/" in lowered and not details["hardware"]:
+            details["hardware"] = _scope_tail(scope)
+        elif "/location/" in lowered and not details["location"]:
+            details["location"] = _scope_tail(scope)
+        elif "/type/" in lowered:
+            details["types"].append(_scope_tail(scope))
+
+    details["hint"] = details["name"] or details["hardware"] or details["location"]
+    return details
 
 
 async def probe_device(host: str, port: int, username: str, password: str) -> dict[str, Any]:
@@ -138,7 +151,11 @@ async def probe_device(host: str, port: int, username: str, password: str) -> di
                 logger.warning("ONVIF GetProfiles failed for %s:%s (encrypt=%s): %s", host, port, encrypt, exc)
                 continue
 
-            channels = [await _describe_profile(media, profile, username, password) for profile in profiles]
+            video_sources = await _get_video_sources(media, host, port, encrypt)
+            channels = [
+                await _describe_profile(media, profile, username, password, index + 1, video_sources)
+                for index, profile in enumerate(profiles)
+            ]
             return {**device_info, "host": host, "port": port, "channels": channels}
         finally:
             try:
@@ -154,22 +171,89 @@ async def probe_device(host: str, port: int, username: str, password: str) -> di
     ) from last_exc
 
 
-async def _describe_profile(media: Any, profile: Any, username: str, password: str) -> dict[str, Any]:
+async def _get_video_sources(media: Any, host: str, port: int, encrypt: bool) -> dict[str, dict[str, Any]]:
+    try:
+        sources = await media.GetVideoSources()
+    except Exception as exc:
+        logger.warning("ONVIF GetVideoSources failed for %s:%s (encrypt=%s): %s", host, port, encrypt, exc)
+        return {}
+
+    details: dict[str, dict[str, Any]] = {}
+    for source in sources or []:
+        token = getattr(source, "token", None)
+        if not token:
+            continue
+        resolution = None
+        res = getattr(source, "Resolution", None)
+        if res is not None:
+            resolution = f"{getattr(res, 'Width', '?')}x{getattr(res, 'Height', '?')}"
+        details[token] = {
+            "source_token": token,
+            "source_resolution": resolution,
+            "source_framerate": getattr(source, "Framerate", None),
+        }
+    return details
+
+
+def _clean_name(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _guess_stream_label(profile_name: str | None, encoder_name: str | None, resolution: str | None) -> str:
+    text = " ".join(part for part in (profile_name, encoder_name) if part).lower()
+    if any(marker in text for marker in ("sub", "secondary", "minor", "low", "stream2", "stream 2")):
+        return "Sub stream"
+    if any(marker in text for marker in ("main", "primary", "major", "high", "stream1", "stream 1")):
+        return "Main stream"
+    if resolution and "x" in resolution:
+        try:
+            width, height = [int(part) for part in resolution.lower().split("x", 1)]
+            return "Main stream" if width >= 1280 or height >= 720 else "Sub stream"
+        except ValueError:
+            pass
+    return "Stream"
+
+
+async def _describe_profile(
+    media: Any,
+    profile: Any,
+    username: str,
+    password: str,
+    index: int,
+    video_sources: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
     token = getattr(profile, "token", None)
-    name = getattr(profile, "Name", None) or token or "Channel"
+    profile_name = _clean_name(getattr(profile, "Name", None))
+    name = profile_name or token or f"Channel {index}"
     resolution = None
     encoding = None
     framerate = None
+    width = None
+    height = None
+
+    video_source_cfg = getattr(profile, "VideoSourceConfiguration", None)
+    source_name = _clean_name(getattr(video_source_cfg, "Name", None)) if video_source_cfg is not None else None
+    source_token = getattr(video_source_cfg, "SourceToken", None) if video_source_cfg is not None else None
 
     video_cfg = getattr(profile, "VideoEncoderConfiguration", None)
+    encoder_name = _clean_name(getattr(video_cfg, "Name", None)) if video_cfg is not None else None
     if video_cfg is not None:
         encoding = getattr(video_cfg, "Encoding", None)
         res = getattr(video_cfg, "Resolution", None)
         if res is not None:
-            resolution = f"{getattr(res, 'Width', '?')}x{getattr(res, 'Height', '?')}"
+            width = getattr(res, "Width", None)
+            height = getattr(res, "Height", None)
+            resolution = f"{width or '?'}x{height or '?'}"
         rate_control = getattr(video_cfg, "RateControl", None)
         if rate_control is not None:
             framerate = getattr(rate_control, "FrameRateLimit", None)
+
+    stream_label = _guess_stream_label(profile_name, encoder_name, resolution)
+    configured_name = source_name or profile_name or encoder_name or f"Channel {index}"
+    display_name = configured_name if stream_label == "Main stream" else f"{configured_name} ({stream_label})"
 
     rtsp_url = None
     error = None
@@ -190,12 +274,23 @@ async def _describe_profile(media: Any, profile: Any, username: str, password: s
 
     return {
         "profile_token": token,
-        "name": name,
+        "name": display_name,
+        "configured_name": configured_name,
+        "profile_name": profile_name or name,
+        "source_name": source_name,
+        "encoder_name": encoder_name,
+        "source_token": source_token,
+        "stream_label": stream_label,
+        "channel_index": index,
         "resolution": resolution,
+        "resolution_width": width,
+        "resolution_height": height,
         "encoding": encoding,
         "framerate": framerate,
+        **video_sources.get(source_token, {}),
         "rtsp_url": rtsp_url,
         "error": error,
+        "usable": bool(rtsp_url and not error),
     }
 
 
@@ -203,7 +298,10 @@ def _inject_credentials(rtsp_url: str, username: str, password: str) -> str:
     if not username:
         return rtsp_url
     parsed = urlsplit(rtsp_url)
-    netloc = f"{username}:{password}@{parsed.hostname}"
+    hostname = parsed.hostname or ""
+    if ":" in hostname and not hostname.startswith("["):
+        hostname = f"[{hostname}]"
+    netloc = f"{quote(username, safe='')}:{quote(password, safe='')}@{hostname}"
     if parsed.port:
         netloc += f":{parsed.port}"
     return parsed._replace(netloc=netloc).geturl()

@@ -4,7 +4,7 @@
       <div class="login-brand">
         <img :src="logoSrc" :alt="appearance.app_name" class="login-mark" />
         <div>
-          <div style="font-weight: 800; font-size: 1.1rem; letter-spacing: -0.01em;">{{ appearance.app_name }}</div>
+          <div style="font-weight: 800; font-size: 1.1rem; letter-spacing: 0;">{{ appearance.app_name }}</div>
           <div style="font-size: 0.8rem; color: var(--text-muted);">Walk-in Greeting AI</div>
         </div>
       </div>

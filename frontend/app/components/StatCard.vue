@@ -18,14 +18,14 @@ defineProps<{ label: string, value: number | string | null | undefined }>()
   font-size: 0.78rem;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0;
   color: var(--text-muted);
 }
 
 .stat-value {
   font-size: 1.9rem;
   font-weight: 800;
-  letter-spacing: -0.02em;
+  letter-spacing: 0;
   margin-top: 0.3rem;
   overflow: hidden;
   text-overflow: ellipsis;

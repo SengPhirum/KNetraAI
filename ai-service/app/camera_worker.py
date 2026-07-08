@@ -25,10 +25,12 @@ class CameraWorker:
         self.backend = backend
         self.task: asyncio.Task | None = None
         self.running = False
+        self.ai_enabled = camera.ai_enabled
         self.status = "stopped"
         self.last_error: str | None = None
         self.last_greeting_at: dict[str, float] = {}
         self.latest_jpeg: bytes | None = None
+        self.latest_faces: list[dict[str, Any]] = []
         self.frame_version = 0
         self._frame_condition = asyncio.Condition()
 
@@ -58,7 +60,15 @@ class CameraWorker:
             "status": self.status,
             "last_error": self.last_error,
             "running": self.running,
+            "ai_enabled": self.ai_enabled,
+            "faces": self.latest_faces,
         }
+
+    def set_ai_enabled(self, enabled: bool) -> None:
+        self.ai_enabled = enabled
+        self.camera.ai_enabled = enabled
+        if not enabled:
+            self.latest_faces = []
 
     async def _run(self) -> None:
         min_interval = 1.0 / max(0.1, float(settings.process_fps))
@@ -75,15 +85,26 @@ class CameraWorker:
                     ok, frame = await asyncio.to_thread(cap.read)
                     if not ok or frame is None:
                         raise RuntimeError("Camera frame read failed")
-                    await self._publish_frame(frame)
                     now = monotonic()
-                    if now - last_processed < min_interval:
+                    if self.ai_enabled and now - last_processed >= min_interval:
+                        last_processed = now
+                        faces = await asyncio.to_thread(self.provider.detect_and_embed, frame)
+                        overlays: list[dict[str, Any]] = []
+                        for face in faces:
+                            if face.metadata.get("detection_kind") == "person" or not face.embedding:
+                                recognition = {"known": False}
+                                overlays.append(self._face_overlay(face, recognition))
+                                continue
+                            recognition = await self.backend.recognize(face.embedding)
+                            overlays.append(self._face_overlay(face, recognition))
+                            await self._handle_face(frame, face, recognition)
+                        self.latest_faces = overlays
+                    elif not self.ai_enabled and self.latest_faces:
+                        self.latest_faces = []
+
+                    await self._publish_frame(frame)
+                    if self.ai_enabled and now - last_processed < min_interval:
                         await asyncio.sleep(0.01)
-                        continue
-                    last_processed = now
-                    faces = await asyncio.to_thread(self.provider.detect_and_embed, frame)
-                    for face in faces:
-                        await self._handle_face(frame, face)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -97,7 +118,8 @@ class CameraWorker:
         self.status = "stopped"
 
     async def _publish_frame(self, frame) -> None:
-        jpeg = await asyncio.to_thread(self._encode_frame, frame)
+        overlays = list(self.latest_faces) if self.ai_enabled else []
+        jpeg = await asyncio.to_thread(self._encode_frame, frame, overlays)
         if jpeg is None:
             return
         async with self._frame_condition:
@@ -106,13 +128,44 @@ class CameraWorker:
             self._frame_condition.notify_all()
 
     @staticmethod
-    def _encode_frame(frame) -> bytes | None:
+    def _encode_frame(frame, overlays: list[dict[str, Any]] | None = None) -> bytes | None:
+        if overlays:
+            frame = frame.copy()
+            for overlay in overlays:
+                CameraWorker._draw_face_overlay(frame, overlay)
         height, width = frame.shape[:2]
         if width > settings.stream_max_width > 0:
             scale = settings.stream_max_width / width
             frame = cv2.resize(frame, (settings.stream_max_width, int(height * scale)))
         ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), int(settings.stream_jpeg_quality)])
         return buf.tobytes() if ok else None
+
+    @staticmethod
+    def _draw_face_overlay(frame, overlay: dict[str, Any]) -> None:
+        bbox = overlay.get("bbox") or []
+        if len(bbox) != 4:
+            return
+        height, width = frame.shape[:2]
+        x1, y1, x2, y2 = [int(v) for v in bbox]
+        x1 = max(0, min(width - 1, x1))
+        x2 = max(0, min(width - 1, x2))
+        y1 = max(0, min(height - 1, y1))
+        y2 = max(0, min(height - 1, y2))
+        if x2 <= x1 or y2 <= y1:
+            return
+
+        green = (34, 197, 94)
+        cv2.rectangle(frame, (x1, y1), (x2, y2), green, 2)
+        label = f"Type: {overlay.get('type_label', 'N/A')} | Gender: {overlay.get('gender_label', 'N/A')}"
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        font_scale = 0.52
+        thickness = 1
+        (text_width, text_height), baseline = cv2.getTextSize(label, font, font_scale, thickness)
+        label_y = max(text_height + 8, y1 - 6)
+        label_x = min(x1, max(0, width - text_width - 10))
+        label_x2 = min(width - 1, label_x + text_width + 10)
+        cv2.rectangle(frame, (label_x, label_y - text_height - 8), (label_x2, label_y + baseline), green, -1)
+        cv2.putText(frame, label, (label_x + 5, label_y - 5), font, font_scale, (2, 6, 23), thickness, cv2.LINE_AA)
 
     async def stream_frames(self):
         """Async generator of multipart/x-mixed-replace JPEG chunks for the live view."""
@@ -140,13 +193,37 @@ class CameraWorker:
                 b"Content-Length: " + str(len(jpeg)).encode() + b"\r\n\r\n" + jpeg + b"\r\n"
             )
 
-    async def _handle_face(self, frame, face: FaceResult) -> None:
-        recognition = await self.backend.recognize(face.embedding)
+    def _face_overlay(self, face: FaceResult, recognition: dict[str, Any]) -> dict[str, Any]:
+        person_type = recognition.get("person_type") if recognition.get("known") else None
+        detection_kind = face.metadata.get("detection_kind", "face")
+        gender = (
+            face.gender
+            if face.gender in ("male", "female")
+            and (face.gender_confidence or 0.0) >= settings.gender_min_confidence
+            else None
+        )
+        return {
+            "bbox": face.bbox,
+            "type": person_type or "unknown",
+            "type_label": person_type.title() if person_type else "N/A",
+            "gender": gender or "unknown",
+            "gender_label": "M" if gender == "male" else "F" if gender == "female" else "N/A",
+            "confidence": recognition.get("similarity") if recognition.get("known") else face.confidence,
+            "detection_kind": detection_kind,
+        }
+
+    async def _handle_face(self, frame, face: FaceResult, recognition: dict[str, Any]) -> None:
         known = bool(recognition.get("known"))
         person_id = recognition.get("person_id") if known else None
         person_type = recognition.get("person_type") if known else "unknown"
         similarity = recognition.get("similarity") if known else None
-        cooldown_key = f"person:{person_id}" if person_id else f"unknown:{self.camera.id}:{face.gender or 'unknown'}"
+        gender_estimate = (
+            face.gender
+            if face.gender in ("male", "female")
+            and (face.gender_confidence or 0.0) >= settings.gender_min_confidence
+            else None
+        )
+        cooldown_key = f"person:{person_id}" if person_id else f"unknown:{self.camera.id}:{gender_estimate or 'unknown'}"
         now = monotonic()
         last = self.last_greeting_at.get(cooldown_key, 0.0)
         if now - last < settings.greeting_cooldown_seconds:
@@ -160,8 +237,8 @@ class CameraWorker:
             "person_id": person_id,
             "person_type": person_type or "unknown",
             "confidence": similarity if known else face.confidence,
-            "gender_estimate": face.gender,
-            "gender_confidence": face.gender_confidence,
+            "gender_estimate": gender_estimate,
+            "gender_confidence": face.gender_confidence if gender_estimate else None,
             "greeting": greeting,
             "snapshot_path": snapshot_rel,
             "raw": {

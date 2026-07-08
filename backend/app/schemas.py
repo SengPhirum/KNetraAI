@@ -46,6 +46,7 @@ class CameraCreate(BaseModel):
     location: str | None = None
     rtsp_url: str
     enabled: bool = True
+    ai_enabled: bool = False
     source: Literal["manual", "onvif"] = "manual"
     onvif_host: str | None = None
     onvif_profile_token: str | None = None
@@ -57,6 +58,7 @@ class CameraUpdate(BaseModel):
     location: str | None = None
     rtsp_url: str | None = None
     enabled: bool | None = None
+    ai_enabled: bool | None = None
 
 
 class CameraDiscoverRequest(BaseModel):
@@ -73,6 +75,10 @@ class CameraProbeRequest(BaseModel):
 class CameraTestStreamRequest(BaseModel):
     rtsp_url: str
     timeout_ms: int = 6000
+
+
+class CameraAiModeRequest(BaseModel):
+    enabled: bool
 
 
 class PersonCreate(BaseModel):

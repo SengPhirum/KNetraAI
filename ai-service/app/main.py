@@ -12,6 +12,7 @@ from .camera_worker import CameraWorker
 from .config import settings
 from .onvif_discovery import OnvifError
 from .schemas import (
+    CameraAiModeRequest,
     CameraStartRequest,
     DiscoveryProbeRequest,
     DiscoveryScanRequest,
@@ -72,6 +73,15 @@ async def stop_camera(camera_id: str):
     info = worker.info()
     workers.pop(camera_id, None)
     return info
+
+
+@app.post("/cameras/{camera_id}/ai", dependencies=[Depends(verify_internal_key)])
+async def set_camera_ai(camera_id: str, payload: CameraAiModeRequest):
+    worker = workers.get(camera_id)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Camera worker not found")
+    worker.set_ai_enabled(payload.enabled)
+    return worker.info()
 
 
 @app.get("/cameras", dependencies=[Depends(verify_internal_key)])

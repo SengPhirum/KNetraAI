@@ -3,7 +3,7 @@
     <div class="page-header">
       <div>
         <h1 class="page-title">Live Camera Monitoring</h1>
-        <p class="page-subtitle">Real-time camera feeds, worker status, and live walk-in events.</p>
+        <p class="page-subtitle">Real-time camera feeds, AI face overlays, and live walk-in events.</p>
       </div>
       <button class="btn secondary" type="button" @click="load">Refresh</button>
     </div>
@@ -28,18 +28,19 @@
             <button class="btn sm secondary" type="button" @click="focusedCameraId = null">&larr; Back to grid</button>
             <strong style="align-self: center; margin-left: 0.4rem;">{{ focusedCamera.name }}</strong>
             <span class="badge dot" :class="statusClass(focusedCamera.status)">{{ focusedCamera.status }}</span>
+            <span class="badge dot" :class="focusedCamera.ai_enabled ? 'success' : ''">{{ focusedCamera.ai_enabled ? 'AI on' : 'AI off' }}</span>
           </div>
           <div class="stream-box focused">
             <LiveStreamTile
               :camera="focusedCamera"
               :src="streamSrc(focusedCamera)"
               :fallback-image="snapshotUrl(latestEvent(focusedCamera.id))"
-              :fallback-text="focusedCamera.status === 'running' ? 'Waiting for video...' : 'Camera worker is stopped - click Start to view the live feed'"
+              :fallback-text="focusedCamera.status === 'running' ? 'Waiting for video...' : 'Live worker is offline - start live from Camera Management'"
             />
           </div>
           <div class="btn-row" style="margin-top: 0.85rem;">
-            <button class="btn sm" @click="start(focusedCamera.id)">Start AI</button>
-            <button class="btn sm secondary" @click="stop(focusedCamera.id)">Stop AI</button>
+            <button class="btn sm" :disabled="!canEnableAi(focusedCamera)" @click="enableAi(focusedCamera)">Enable AI</button>
+            <button class="btn sm secondary" :disabled="!canDisableAi(focusedCamera)" @click="disableAi(focusedCamera)">Disable AI</button>
           </div>
         </div>
 
@@ -48,19 +49,22 @@
             <div v-for="camera in pagedCameras" :key="camera.id" class="grid-tile">
               <div class="tile-header">
                 <strong class="truncate" :title="camera.name">{{ camera.name }}</strong>
-                <span class="badge dot" :class="statusClass(camera.status)">{{ camera.status }}</span>
+                <div class="btn-row tile-badges">
+                  <span class="badge dot" :class="statusClass(camera.status)">{{ camera.status }}</span>
+                  <span class="badge dot" :class="camera.ai_enabled ? 'success' : ''">{{ camera.ai_enabled ? 'AI on' : 'AI off' }}</span>
+                </div>
               </div>
               <div class="stream-box" @dblclick="focusedCameraId = camera.id">
                 <LiveStreamTile
                   :camera="camera"
                   :src="streamSrc(camera)"
                   :fallback-image="snapshotUrl(latestEvent(camera.id))"
-                  :fallback-text="camera.status === 'running' ? 'Waiting for video...' : 'Camera worker is stopped'"
+                  :fallback-text="camera.status === 'running' ? 'Waiting for video...' : 'Live worker is offline'"
                 />
               </div>
               <div class="btn-row" style="margin-top: 0.5rem;">
-                <button class="btn sm" @click="start(camera.id)">Start</button>
-                <button class="btn sm secondary" @click="stop(camera.id)">Stop</button>
+                <button class="btn sm" :disabled="!canEnableAi(camera)" @click="enableAi(camera)">Enable AI</button>
+                <button class="btn sm secondary" :disabled="!canDisableAi(camera)" @click="disableAi(camera)">Disable AI</button>
                 <button class="btn sm secondary" @click="focusedCameraId = camera.id">Focus</button>
               </div>
             </div>
@@ -80,7 +84,7 @@
         <table class="table">
           <thead><tr><th>Snapshot</th><th>Time</th><th>Camera</th><th>Person</th><th>Type</th><th>Greeting</th><th>Confidence</th></tr></thead>
           <tbody>
-            <tr v-if="!events.length"><td colspan="7" class="empty-row">No detection events yet. Keep a face in view of a running camera.</td></tr>
+            <tr v-if="!events.length"><td colspan="7" class="empty-row">No detection events yet. Enable AI and keep a face in view of a live camera.</td></tr>
             <tr v-for="event in events" :key="event.id">
               <td>
                 <button v-if="event.snapshot_path" class="snapshot-thumb" type="button" @click="selectedEvent = event">
@@ -156,6 +160,7 @@ const pagedCameras = computed(() => {
 })
 const gridStyle = computed(() => ({ gridTemplateColumns: `repeat(${layoutCols[layout.value] || 2}, 1fr)` }))
 const focusedCamera = computed(() => cameras.value.find(c => c.id === focusedCameraId.value) || null)
+const runningStatuses = new Set(['starting', 'connecting', 'running', 'reconnecting'])
 
 const setLayout = (opt: number) => {
   layout.value = opt
@@ -166,20 +171,34 @@ const formatDate = (value?: string) => value ? new Date(value).toLocaleString() 
 const confidence = (event?: any) => event?.confidence ? Number(event.confidence).toFixed(3) : '-'
 const typeClass = (type: string) => type === 'staff' ? 'info' : type === 'customer' ? 'success' : 'warning'
 
-const start = async (id: string) => {
+const isBusy = ref(false)
+const canEnableAi = (camera: any) => Boolean(camera?.enabled) && runningStatuses.has(camera.status) && !camera.ai_enabled && !isBusy.value
+const canDisableAi = (camera: any) => Boolean(camera?.ai_enabled) && !isBusy.value
+
+const enableAi = async (camera: any) => {
   error.value = ''
+  isBusy.value = true
   try {
-    await apiFetch(`/cameras/${id}/start`, { method: 'POST' })
+    await apiFetch(`/cameras/${camera.id}/ai`, { method: 'POST', body: { enabled: true } })
     await load()
-  } catch (e: any) { error.value = e?.data?.detail || e?.message || 'Could not start camera' }
+  } catch (e: any) {
+    error.value = e?.data?.detail || e?.message || 'Could not enable AI'
+  } finally {
+    isBusy.value = false
+  }
 }
 
-const stop = async (id: string) => {
+const disableAi = async (camera: any) => {
   error.value = ''
+  isBusy.value = true
   try {
-    await apiFetch(`/cameras/${id}/stop`, { method: 'POST' })
+    await apiFetch(`/cameras/${camera.id}/ai`, { method: 'POST', body: { enabled: false } })
     await load()
-  } catch (e: any) { error.value = e?.data?.detail || e?.message || 'Could not stop camera' }
+  } catch (e: any) {
+    error.value = e?.data?.detail || e?.message || 'Could not disable AI'
+  } finally {
+    isBusy.value = false
+  }
 }
 
 const statusClass = (status: string) => {
@@ -226,6 +245,11 @@ onBeforeUnmount(() => {
   gap: 0.5rem;
   margin-bottom: 0.4rem;
   font-size: 0.85rem;
+}
+
+.tile-badges {
+  flex-wrap: nowrap;
+  justify-content: flex-end;
 }
 
 .stream-box {

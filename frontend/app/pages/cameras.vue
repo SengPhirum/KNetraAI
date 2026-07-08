@@ -1,52 +1,105 @@
 <template>
-  <div>
-    <div class="page-header">
+  <div class="camera-page">
+    <div class="page-header camera-header">
       <div>
         <h1 class="page-title">Camera Management</h1>
-        <p class="page-subtitle">Connect RTSP cameras or NVR channels and control the AI workers.</p>
+        <p class="page-subtitle">Connect RTSP cameras or NVR channels and start or stop live video workers.</p>
       </div>
-      <button class="btn secondary" type="button" @click="showHelp = !showHelp">{{ showHelp ? 'Hide Camera Setup Help' : 'Camera Setup Help' }}</button>
+      <div class="btn-row page-actions">
+        <button class="btn secondary" type="button" :disabled="loading" @click="load">
+          {{ loading ? 'Refreshing...' : 'Refresh' }}
+        </button>
+        <button class="btn secondary" type="button" @click="showHelp = !showHelp">
+          {{ showHelp ? 'Hide Help' : 'Setup Help' }}
+        </button>
+      </div>
+    </div>
+
+    <div class="camera-stats" aria-label="Camera summary">
+      <div class="stat-chip">
+        <span>{{ stats.total }}</span>
+        <small>Total</small>
+      </div>
+      <div class="stat-chip">
+        <span>{{ stats.enabled }}</span>
+        <small>Active</small>
+      </div>
+      <div class="stat-chip">
+        <span>{{ stats.running }}</span>
+        <small>Live</small>
+      </div>
+      <div class="stat-chip danger-soft">
+        <span>{{ stats.needsAttention }}</span>
+        <small>Needs attention</small>
+      </div>
     </div>
 
     <CameraDiscoveryPanel @added="load" />
 
-    <div class="card" style="margin-bottom: 1rem;">
-      <h2 class="card-title">{{ editingId ? 'Edit Camera' : 'Add Camera Manually' }}</h2>
-      <form class="form-grid" @submit.prevent="saveCamera">
-        <div><label class="label">Name</label><input v-model="form.name" class="input" required /></div>
-        <div><label class="label">Branch</label><input v-model="form.branch" class="input" /></div>
-        <div><label class="label">Location</label><input v-model="form.location" class="input" /></div>
-        <div class="full-row">
-          <label class="label">RTSP URL</label>
-          <input v-model="form.rtsp_url" class="input" placeholder="rtsp://user:pass@ip:554/stream" required />
-          <small class="hint">Not sure about the URL? Open Camera Setup Help for brand templates (Hikvision, EZVIZ, Dahua, ...), or use Discover Cameras above to pick a channel instead.</small>
+    <section id="manual-camera-form" class="card">
+      <div class="section-heading">
+        <div>
+          <p class="section-kicker">Manual setup</p>
+          <h2 class="card-title">{{ editingId ? 'Edit Camera' : 'Add Camera Manually' }}</h2>
         </div>
-        <div class="btn-row">
-          <button class="btn" type="submit">{{ editingId ? 'Save Camera' : 'Add Camera' }}</button>
-          <button class="btn secondary" type="button" :disabled="testing" @click="testConnection">{{ testing ? 'Testing...' : 'Test Connection' }}</button>
+        <span v-if="editingId" class="badge info">Editing</span>
+      </div>
+
+      <form class="form-grid camera-form" @submit.prevent="saveCamera">
+        <div>
+          <label class="label" for="camera-name">Name</label>
+          <input id="camera-name" v-model="form.name" class="input" required />
+        </div>
+        <div>
+          <label class="label" for="camera-branch">Branch</label>
+          <input id="camera-branch" v-model="form.branch" class="input" />
+        </div>
+        <div>
+          <label class="label" for="camera-location">Location</label>
+          <input id="camera-location" v-model="form.location" class="input" />
+        </div>
+        <label class="checkbox-label active-toggle">
+          <input v-model="form.enabled" type="checkbox" />
+          <span>Active camera</span>
+        </label>
+        <div class="full-row">
+          <label class="label" for="camera-rtsp">RTSP URL</label>
+          <input id="camera-rtsp" v-model="form.rtsp_url" class="input" placeholder="rtsp://user:pass@ip:554/stream" required />
+          <small class="hint">Use discovery for ONVIF devices, or paste a brand-specific RTSP URL.</small>
+        </div>
+        <div class="btn-row full-row">
+          <button class="btn" type="submit" :disabled="saving">{{ saving ? 'Saving...' : editingId ? 'Save Camera' : 'Add Camera' }}</button>
+          <button class="btn secondary" type="button" :disabled="testing || !form.rtsp_url" @click="testConnection">
+            {{ testing ? 'Testing...' : 'Test Connection' }}
+          </button>
           <button v-if="editingId" class="btn secondary" type="button" @click="resetForm">Cancel</button>
         </div>
       </form>
       <p v-if="testResult?.ok" class="notice">Connected - {{ testResult.width }}x{{ testResult.height }}</p>
       <p v-if="testResult && !testResult.ok" class="error">{{ testResult.error }}</p>
       <p v-if="error" class="error">{{ error }}</p>
-    </div>
+    </section>
 
-    <div v-if="showHelp" class="card" style="margin-bottom: 1rem;">
+    <section v-if="showHelp" class="card camera-help">
       <h2 class="card-title">Camera Setup Help</h2>
-      <p style="margin: 0 0 0.85rem; color: #334155; font-size: 0.9rem;">
-        Every RTSP URL follows <code>rtsp://username:password@camera-ip:554/stream-path</code>.
-        Use your camera's local login (not the cloud app account). If the password contains special
-        characters, URL-encode them (<code>@</code> → <code>%40</code>, <code>#</code> → <code>%23</code>).
-        Test the URL in VLC (Media → Open Network Stream) before adding it here.
+      <p class="section-text">
+        RTSP URLs use <code>rtsp://username:password@camera-ip:554/stream-path</code>. Use the local camera login.
+        URL-encode special password characters such as <code>@</code> to <code>%40</code> and <code>#</code> to <code>%23</code>.
       </p>
 
-      <div class="table-wrap" style="box-shadow: none; margin-bottom: 0.85rem;">
+      <div class="table-wrap compact-table responsive-table">
         <table class="table">
-          <thead><tr><th>Brand</th><th>Main stream URL template</th><th></th></tr></thead>
+          <caption class="sr-only">RTSP templates by camera brand</caption>
+          <thead>
+            <tr>
+              <th scope="col">Brand</th>
+              <th scope="col">Main stream URL template</th>
+              <th scope="col">Action</th>
+            </tr>
+          </thead>
           <tbody>
             <tr v-for="tpl in rtspTemplates" :key="tpl.brand">
-              <td style="white-space: nowrap;">{{ tpl.brand }}</td>
+              <th scope="row">{{ tpl.brand }}</th>
               <td><code>{{ tpl.url }}</code></td>
               <td><button class="btn sm secondary" type="button" @click="useTemplate(tpl.url)">Use</button></td>
             </tr>
@@ -54,73 +107,150 @@
         </table>
       </div>
 
-      <div style="display: grid; gap: 0.5rem; color: #334155; font-size: 0.9rem;">
+      <div class="help-details">
         <details>
-          <summary style="cursor: pointer; font-weight: 700;">Hikvision - step by step</summary>
-          <ol style="margin: 0.5rem 0 0; padding-left: 1.25rem; line-height: 1.6;">
-            <li>Find the camera IP with the SADP tool or your router's client list; activate the camera if it is new.</li>
-            <li>In the camera web page, confirm RTSP is enabled (Configuration → Network → Advanced → Integration Protocol) and port is 554.</li>
-            <li>Set RTSP Authentication to digest/basic (Configuration → System → Security → Authentication).</li>
-            <li>Channel code = channel + stream: main stream of camera 1 is <code>101</code>, sub stream <code>102</code>. On an NVR, camera 2 main stream is <code>201</code>.</li>
+          <summary>Hikvision / HiLook / Annke</summary>
+          <ol>
+            <li>Confirm RTSP and ONVIF are enabled in the camera or NVR network settings.</li>
+            <li>Use channel codes such as <code>101</code> for camera 1 main stream and <code>102</code> for sub stream.</li>
+            <li>On an NVR, camera 2 main stream is commonly <code>201</code>.</li>
           </ol>
         </details>
         <details>
-          <summary style="cursor: pointer; font-weight: 700;">EZVIZ - step by step</summary>
-          <ol style="margin: 0.5rem 0 0; padding-left: 1.25rem; line-height: 1.6;">
-            <li>Username is <code>admin</code>; the password is the 6-character <strong>verification code</strong> printed on the camera sticker (not your EZVIZ app password).</li>
-            <li>Enable RTSP/local service via the EZVIZ Studio PC app (Device Settings → Advanced → Local Service) - some newer models ship with it off.</li>
-            <li>Turn off Image Encryption in the EZVIZ app (Settings → Privacy), otherwise the stream is scrambled.</li>
-            <li>Some cloud-only models have no RTSP; if VLC cannot connect, check your model or pull the stream through an NVR instead.</li>
+          <summary>EZVIZ</summary>
+          <ol>
+            <li>Use <code>admin</code> plus the camera verification code, not the cloud app password.</li>
+            <li>Enable local service in EZVIZ Studio and turn off image encryption when RTSP is needed.</li>
           </ol>
         </details>
         <details>
-          <summary style="cursor: pointer; font-weight: 700;">Other / unknown brand (ONVIF)</summary>
-          <ol style="margin: 0.5rem 0 0; padding-left: 1.25rem; line-height: 1.6;">
-            <li>Run ONVIF Device Manager (free, Windows) on the same network - it discovers most IP cameras and shows the exact RTSP URI under Live video.</li>
-            <li>Or look up your model in the iSpy camera connection database (ispyconnect.com/cameras).</li>
-            <li>TP-Link Tapo: create a separate Camera Account in the Tapo app first (Settings → Advanced → Camera Account).</li>
+          <summary>Other ONVIF cameras</summary>
+          <ol>
+            <li>Use discovery above first; it reads the device profile names and stream URLs when the camera supports ONVIF media services.</li>
+            <li>Some devices require a separate ONVIF or integration-protocol account.</li>
           </ol>
         </details>
-        <p style="margin: 0;">Full brand guides and troubleshooting: see <strong>docs/user-manual-and-configuration.md</strong>, section 6.</p>
       </div>
-    </div>
+    </section>
 
-    <div class="table-wrap">
-      <table class="table">
-        <thead><tr><th>Name</th><th>Branch</th><th>Location</th><th>Source</th><th>Status</th><th>RTSP</th><th>Actions</th></tr></thead>
-        <tbody>
-          <tr v-if="!cameras.length"><td colspan="7" class="empty-row">No cameras yet. Add your first camera above.</td></tr>
-          <tr v-for="camera in cameras" :key="camera.id">
-            <td style="font-weight: 600;">{{ camera.name }}</td>
-            <td>{{ camera.branch || '-' }}</td>
-            <td>{{ camera.location || '-' }}</td>
-            <td><span class="badge" :class="camera.source === 'onvif' ? 'info' : ''">{{ camera.source === 'onvif' ? 'ONVIF' : 'Manual' }}</span></td>
-            <td><span class="badge dot" :class="statusClass(camera.status)">{{ camera.status }}</span></td>
-            <td class="truncate" :title="camera.rtsp_url">{{ camera.rtsp_url }}</td>
-            <td>
-              <div class="btn-row">
-                <button class="btn sm secondary" @click="edit(camera)">Edit</button>
-                <button class="btn sm" @click="start(camera.id)">Start</button>
-                <button class="btn sm secondary" @click="stop(camera.id)">Stop</button>
-                <button class="btn sm danger" @click="remove(camera.id)">Delete</button>
-              </div>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+    <section class="camera-list-section">
+      <div class="list-toolbar">
+        <div>
+          <p class="section-kicker">Configured cameras</p>
+          <h2 class="card-title">Active channels and workers</h2>
+        </div>
+        <div class="segmented-control" role="group" aria-label="Camera filter">
+          <button type="button" :class="{ active: cameraFilter === 'active' }" @click="cameraFilter = 'active'">Active</button>
+          <button type="button" :class="{ active: cameraFilter === 'all' }" @click="cameraFilter = 'all'">All</button>
+        </div>
+      </div>
+
+      <div class="table-wrap camera-table responsive-table">
+        <table class="table">
+          <caption class="sr-only">Configured cameras</caption>
+          <thead>
+            <tr>
+              <th scope="col">Camera</th>
+              <th scope="col">Site</th>
+              <th scope="col">Source</th>
+              <th scope="col">Active</th>
+              <th scope="col">Live</th>
+              <th scope="col">RTSP</th>
+              <th scope="col">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-if="!visibleCameras.length">
+              <td colspan="7" class="empty-row">{{ emptyMessage }}</td>
+            </tr>
+            <tr v-for="camera in visibleCameras" :key="camera.id">
+              <th scope="row">
+                <div class="primary-cell">{{ camera.name }}</div>
+                <div v-if="camera.last_error" class="muted-cell danger-text">{{ camera.last_error }}</div>
+              </th>
+              <td>
+                <div>{{ camera.branch || '-' }}</div>
+                <div class="muted-cell">{{ camera.location || '-' }}</div>
+              </td>
+              <td><span class="badge" :class="camera.source === 'onvif' ? 'info' : ''">{{ camera.source === 'onvif' ? 'ONVIF' : 'Manual' }}</span></td>
+              <td><span class="badge dot" :class="camera.enabled ? 'success' : ''">{{ camera.enabled ? 'Active' : 'Disabled' }}</span></td>
+              <td><span class="badge dot" :class="statusClass(camera.status)">{{ statusLabel(camera.status) }}</span></td>
+              <td class="truncate" :title="camera.rtsp_url">{{ maskRtsp(camera.rtsp_url) }}</td>
+              <td>
+                <div class="btn-row action-buttons">
+                  <button class="btn sm secondary" type="button" @click="edit(camera)">Edit</button>
+                  <button class="btn sm" type="button" :disabled="!canStartLive(camera)" @click="start(camera)">
+                    {{ busyCameraId === camera.id && busyAction === 'start' ? 'Starting...' : 'Start Live' }}
+                  </button>
+                  <button class="btn sm secondary" type="button" :disabled="!canStopLive(camera)" @click="stop(camera)">
+                    {{ busyCameraId === camera.id && busyAction === 'stop' ? 'Stopping...' : 'Stop Live' }}
+                  </button>
+                  <button class="btn sm danger" type="button" :disabled="busyCameraId === camera.id" @click="remove(camera)">
+                    {{ busyCameraId === camera.id && busyAction === 'delete' ? 'Deleting...' : 'Delete' }}
+                  </button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="camera-card-list">
+        <p v-if="!visibleCameras.length" class="empty-row">{{ emptyMessage }}</p>
+        <article v-for="camera in visibleCameras" :key="camera.id" class="camera-mobile-card">
+          <div class="mobile-card-head">
+            <div>
+              <h3>{{ camera.name }}</h3>
+              <p>{{ [camera.branch, camera.location].filter(Boolean).join(' - ') || 'No site set' }}</p>
+            </div>
+            <span class="badge dot" :class="statusClass(camera.status)">{{ statusLabel(camera.status) }}</span>
+          </div>
+          <dl class="detail-grid">
+            <div><dt>Source</dt><dd>{{ camera.source === 'onvif' ? 'ONVIF' : 'Manual' }}</dd></div>
+            <div><dt>Active</dt><dd>{{ camera.enabled ? 'Active' : 'Disabled' }}</dd></div>
+            <div><dt>RTSP</dt><dd class="truncate">{{ maskRtsp(camera.rtsp_url) }}</dd></div>
+            <div v-if="camera.last_error"><dt>Error</dt><dd class="danger-text">{{ camera.last_error }}</dd></div>
+          </dl>
+          <div class="btn-row action-buttons">
+            <button class="btn sm secondary" type="button" @click="edit(camera)">Edit</button>
+            <button class="btn sm" type="button" :disabled="!canStartLive(camera)" @click="start(camera)">Start Live</button>
+            <button class="btn sm secondary" type="button" :disabled="!canStopLive(camera)" @click="stop(camera)">Stop Live</button>
+            <button class="btn sm danger" type="button" :disabled="busyCameraId === camera.id" @click="remove(camera)">Delete</button>
+          </div>
+        </article>
+      </div>
+    </section>
   </div>
 </template>
 
 <script setup lang="ts">
+type Camera = {
+  id: string
+  name: string
+  branch?: string | null
+  location?: string | null
+  rtsp_url: string
+  enabled: boolean
+  ai_enabled: boolean
+  worker_running?: boolean
+  source?: 'manual' | 'onvif'
+  status: string
+  last_error?: string | null
+}
+
 const { apiFetch } = useApi()
-const cameras = ref<any[]>([])
+const cameras = ref<Camera[]>([])
 const error = ref('')
 const showHelp = ref(false)
-const form = reactive({ name: '', branch: '', location: '', rtsp_url: '' })
+const loading = ref(false)
+const saving = ref(false)
+const cameraFilter = ref<'active' | 'all'>('active')
+const form = reactive({ name: '', branch: '', location: '', rtsp_url: '', enabled: true })
 const editingId = ref<string | null>(null)
 const testing = ref(false)
 const testResult = ref<{ ok: boolean; width?: number; height?: number; error?: string } | null>(null)
+const busyCameraId = ref<string | null>(null)
+const busyAction = ref<'start' | 'stop' | 'delete' | null>(null)
 
 const rtspTemplates = [
   { brand: 'Hikvision / HiLook / Annke', url: 'rtsp://user:pass@CAMERA_IP:554/Streaming/Channels/101' },
@@ -132,18 +262,37 @@ const rtspTemplates = [
   { brand: 'Axis', url: 'rtsp://user:pass@CAMERA_IP:554/axis-media/media.amp' }
 ]
 
+const runningStatuses = new Set(['starting', 'connecting', 'running', 'reconnecting'])
+
+const visibleCameras = computed(() => {
+  if (cameraFilter.value === 'active') return cameras.value.filter(camera => camera.enabled)
+  return cameras.value
+})
+
+const stats = computed(() => ({
+  total: cameras.value.length,
+  enabled: cameras.value.filter(camera => camera.enabled).length,
+  running: cameras.value.filter(camera => camera.status === 'running').length,
+  needsAttention: cameras.value.filter(camera => camera.status === 'error' || camera.last_error).length
+}))
+
+const emptyMessage = computed(() => {
+  if (!cameras.value.length) return 'No cameras yet. Add your first camera above.'
+  return 'No active cameras match this view. Switch to All to see disabled cameras.'
+})
+
 const useTemplate = (url: string) => {
   form.rtsp_url = url
-  window.scrollTo({ top: 0, behavior: 'smooth' })
+  document.getElementById('manual-camera-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
 const resetForm = () => {
   editingId.value = null
   testResult.value = null
-  Object.assign(form, { name: '', branch: '', location: '', rtsp_url: '' })
+  Object.assign(form, { name: '', branch: '', location: '', rtsp_url: '', enabled: true })
 }
 
-const edit = (camera: any) => {
+const edit = (camera: Camera) => {
   error.value = ''
   testResult.value = null
   editingId.value = camera.id
@@ -151,9 +300,10 @@ const edit = (camera: any) => {
     name: camera.name || '',
     branch: camera.branch || '',
     location: camera.location || '',
-    rtsp_url: camera.rtsp_url || ''
+    rtsp_url: camera.rtsp_url || '',
+    enabled: camera.enabled !== false
   })
-  window.scrollTo({ top: 0, behavior: 'smooth' })
+  document.getElementById('manual-camera-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
 const statusClass = (status: string) => {
@@ -163,55 +313,113 @@ const statusClass = (status: string) => {
   return ''
 }
 
+const statusLabel = (status: string) => {
+  if (!status) return 'Offline'
+  if (status === 'running') return 'Live'
+  return status.replace(/_/g, ' ')
+}
+
+const maskRtsp = (url: string) => {
+  return url.replace(/(rtsp:\/\/[^:/@]+:)([^@]+)(@)/i, '$1***$3')
+}
+
+const isBusy = (camera: Camera) => busyCameraId.value === camera.id
+const canStartLive = (camera: Camera) => camera.enabled && !runningStatuses.has(camera.status) && !isBusy(camera)
+const canStopLive = (camera: Camera) => runningStatuses.has(camera.status) && !isBusy(camera)
+
 const testConnection = async () => {
-  if (!form.rtsp_url) { error.value = 'Enter an RTSP URL first.'; return }
+  if (!form.rtsp_url) {
+    error.value = 'Enter an RTSP URL first.'
+    return
+  }
   testing.value = true
   testResult.value = null
   error.value = ''
   try {
-    testResult.value = await apiFetch('/cameras/test-stream', { method: 'POST', body: { rtsp_url: form.rtsp_url } })
+    testResult.value = await apiFetch('/cameras/test-stream', { method: 'POST', body: { rtsp_url: form.rtsp_url, timeout_ms: 7000 } })
   } catch (e: any) {
-    testResult.value = { ok: false, error: e?.data?.detail || e.message }
+    testResult.value = { ok: false, error: e?.data?.detail || e.message || 'Test failed' }
   } finally {
     testing.value = false
   }
 }
 
-const load = async () => { cameras.value = await apiFetch('/cameras') }
-const saveCamera = async () => {
+const load = async () => {
+  loading.value = true
   error.value = ''
   try {
+    cameras.value = await apiFetch<Camera[]>('/cameras')
+  } catch (e: any) {
+    error.value = e?.data?.detail || e.message || 'Could not load cameras.'
+  } finally {
+    loading.value = false
+  }
+}
+
+const saveCamera = async () => {
+  error.value = ''
+  saving.value = true
+  const payload = {
+    name: form.name.trim(),
+    branch: form.branch.trim() || undefined,
+    location: form.location.trim() || undefined,
+    rtsp_url: form.rtsp_url.trim(),
+    enabled: form.enabled
+  }
+  try {
     if (editingId.value) {
-      await apiFetch(`/cameras/${editingId.value}`, { method: 'PUT', body: form })
+      await apiFetch(`/cameras/${editingId.value}`, { method: 'PUT', body: payload })
     } else {
-      await apiFetch('/cameras', { method: 'POST', body: form })
+      await apiFetch('/cameras', { method: 'POST', body: payload })
     }
     resetForm()
     await load()
-  } catch (e: any) { error.value = e?.data?.detail || e.message }
+  } catch (e: any) {
+    error.value = e?.data?.detail || e.message || 'Could not save camera.'
+  } finally {
+    saving.value = false
+  }
 }
-const start = async (id: string) => {
+
+const runCameraAction = async (camera: Camera, action: 'start' | 'stop' | 'delete', task: () => Promise<void>) => {
   error.value = ''
+  busyCameraId.value = camera.id
+  busyAction.value = action
   try {
-    await apiFetch(`/cameras/${id}/start`, { method: 'POST' })
+    await task()
     await load()
-  } catch (e: any) { error.value = e?.data?.detail || e.message }
+  } catch (e: any) {
+    const actionLabel = action === 'start' ? 'start live view' : action === 'stop' ? 'stop live view' : 'delete camera'
+    error.value = e?.data?.detail || e.message || `Could not ${actionLabel}.`
+  } finally {
+    busyCameraId.value = null
+    busyAction.value = null
+  }
 }
-const stop = async (id: string) => {
-  error.value = ''
-  try {
-    await apiFetch(`/cameras/${id}/stop`, { method: 'POST' })
-    await load()
-  } catch (e: any) { error.value = e?.data?.detail || e.message }
+
+const start = async (camera: Camera) => {
+  if (!camera.enabled) {
+    error.value = 'Enable this camera before starting live view.'
+    return
+  }
+  await runCameraAction(camera, 'start', async () => {
+    await apiFetch(`/cameras/${camera.id}/start`, { method: 'POST' })
+  })
 }
-const remove = async (id: string) => {
-  if (!confirm('Delete camera?')) return
-  error.value = ''
-  try {
-    await apiFetch(`/cameras/${id}`, { method: 'DELETE' })
-    if (editingId.value === id) resetForm()
-    await load()
-  } catch (e: any) { error.value = e?.data?.detail || e.message }
+
+const stop = async (camera: Camera) => {
+  await runCameraAction(camera, 'stop', async () => {
+    await apiFetch(`/cameras/${camera.id}/stop`, { method: 'POST' })
+  })
 }
+
+const remove = async (camera: Camera) => {
+  if (!confirm(`Delete camera "${camera.name}"?`)) return
+  await runCameraAction(camera, 'delete', async () => {
+    await apiFetch(`/cameras/${camera.id}`, { method: 'DELETE' })
+    if (editingId.value === camera.id) resetForm()
+  })
+}
+
 onMounted(load)
 </script>

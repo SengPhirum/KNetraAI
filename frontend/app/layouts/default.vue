@@ -92,7 +92,7 @@ const nav = [
 .brand-name {
   font-weight: 800;
   font-size: 0.95rem;
-  letter-spacing: -0.01em;
+  letter-spacing: 0;
 }
 
 .brand-sub {
@@ -113,7 +113,7 @@ const nav = [
   font-size: 0.68rem;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0;
   color: #64748b;
   padding: 0.9rem 0.75rem 0.3rem;
 }

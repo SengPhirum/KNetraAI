@@ -13,6 +13,8 @@ async def run_migrations() -> None:
     await execute("ALTER TABLE cameras ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'manual'")
     await execute("ALTER TABLE cameras ADD COLUMN IF NOT EXISTS onvif_host TEXT")
     await execute("ALTER TABLE cameras ADD COLUMN IF NOT EXISTS onvif_profile_token TEXT")
+    await execute("ALTER TABLE cameras ADD COLUMN IF NOT EXISTS ai_enabled BOOLEAN NOT NULL DEFAULT FALSE")
+    await execute("ALTER TABLE cameras ALTER COLUMN ai_enabled SET DEFAULT FALSE")
 
 
 async def seed_data() -> None:
