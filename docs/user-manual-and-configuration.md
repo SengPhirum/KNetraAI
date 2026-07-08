@@ -66,11 +66,11 @@ docker compose --env-file docker/.env.production -f docker/docker-compose.yml up
 ## 4. Main workflow
 
 1. Login as Admin (local password, SSO, or LDAP - see section 11).
-2. Add an RTSP camera in Camera Management (in-app Camera Setup Help covers Hikvision, EZVIZ, Dahua, and more).
+2. Add a camera in Camera Management - use **Discover Cameras (ONVIF)** to connect by IP and pick a channel from a list (section 6.0), or add an RTSP URL manually (in-app Camera Setup Help covers Hikvision, EZVIZ, Dahua, and more).
 3. Create staff or customer profiles - one at a time, by CSV import, or by HR/CRM API sync (section 7).
 4. Upload multiple clear face images for each person.
 5. Start the camera worker.
-6. Monitor live recognition on the dashboard and live page.
+6. Monitor the real-time live view grid and recognition events on the dashboard and Live Monitoring page (section 6.8).
 7. Review Detection History and export reports.
 8. Tune AI thresholds, greeting templates, appearance, and the detection schedule in Settings.
 
@@ -88,6 +88,18 @@ docker compose --env-file docker/.env.production -f docker/docker-compose.yml up
 The system connects to any camera or NVR that provides an RTSP stream. This section explains the RTSP URL format, how to find the required information on your camera, and step-by-step integration guides for common third-party brands (Hikvision, EZVIZ, Dahua, TP-Link Tapo, Reolink, and generic ONVIF cameras).
 
 The same guidance is also available inside the app: open **Camera Management** and click **Camera Setup Help** next to the Add Camera form.
+
+### 6.0 ONVIF discovery and channel picker (recommended first)
+
+Most modern cameras and NVRs (Hikvision, Dahua, Uniview, Axis, Reolink, and most generic IP cameras) support the ONVIF standard. Instead of typing an RTSP URL, use the **Discover Cameras (ONVIF)** panel at the top of Camera Management:
+
+1. **Scan Network** (optional) tries to auto-find ONVIF devices on the local network. This is best-effort: it uses a discovery broadcast that often cannot reach devices from inside a Docker container, so an empty result is normal - just enter the IP directly in step 2.
+2. **Connect by IP**: enter the camera or NVR's IP address, port (usually 80), and its ONVIF username/password (this is often the same admin login used for the camera's web page, not a cloud app account).
+3. Click **Fetch Channels**. The app lists every channel/profile the device reports (name, resolution, codec) with a checkbox and an editable name.
+4. Use **Test** to confirm a channel streams correctly before adding it.
+5. Check the channel(s) you want - on an NVR this lets you add every camera channel in one pass - and click **Add Selected Channels**. The RTSP URL for each channel is resolved and saved automatically; no manual URL entry needed.
+
+If a camera does not support ONVIF (or discovery fails), use the manual **Add Camera** form below with the brand guides in section 6.1-6.4.
 
 ### 6.1 RTSP URL anatomy
 
@@ -249,6 +261,16 @@ ffprobe:  ffprobe -rtsp_transport tcp "rtsp://user:pass@ip:554/..."
 | Works on phone app but RTSP refuses | RTSP/local service disabled (common on EZVIZ) - enable it per 6.4.2, or the model is cloud-only. |
 | Image is scrambled/garbled | EZVIZ image encryption still on, or H.265+ enabled - switch the camera stream to plain H.264. |
 | Stream lags several seconds behind | Lower the camera resolution/bitrate or switch to the sub stream; check CPU load on the AI service. |
+
+### 6.8 Live view (real-time CCTV-style grid)
+
+The **Live Monitoring** page shows a real-time video grid, not just detection snapshots:
+
+- A camera's live feed appears as soon as its AI worker is **running** (Start button in Camera Management or the live page). Stopped cameras show a placeholder instead of a broken stream.
+- Choose a **1 / 4 / 6 / 9-up** layout; if there are more cameras than fit on one page, use Prev/Next to page through them.
+- Double-click a tile, or click **Focus**, to view one camera large; click the fullscreen icon on any tile for a fullscreen feed. Click **Back to grid** to return.
+- The feed auto-reconnects a few seconds after a network hiccup.
+- This uses MJPEG streaming (one JPEG frame at a time over HTTP), reusing the same video the AI worker already captures - there is no extra RTSP connection per viewer. It is intentionally simple (works in every browser, no plugins) rather than the lowest-possible-latency option; very high camera counts or many simultaneous viewers of the same camera will use more bandwidth than a dedicated NVR client.
 
 ## 7. Person registration and face enrollment
 

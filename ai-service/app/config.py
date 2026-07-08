@@ -14,6 +14,10 @@ class Settings(BaseSettings):
     snapshot_jpeg_quality: int = 85
     insightface_model: str = "buffalo_l"
     allow_provider_fallback: bool = True
+    stream_jpeg_quality: int = 80
+    stream_max_width: int = 960
+    onvif_discovery_timeout: float = 4.0
+    onvif_probe_timeout: float = 8.0
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

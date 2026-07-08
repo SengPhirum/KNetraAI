@@ -2,6 +2,7 @@
   "name": "knetraai-frontend",
   "type": "module",
   "private": true,
+  "packageManager": "pnpm@11.9.0",
   "scripts": {
     "dev": "nuxt dev --host 0.0.0.0",
     "build": "nuxt build",

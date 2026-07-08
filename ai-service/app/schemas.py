@@ -21,3 +21,19 @@ class EmbeddingResponse(BaseModel):
     model_version: str
     quality_score: float | None = None
     metadata: dict[str, Any] = {}
+
+
+class DiscoveryScanRequest(BaseModel):
+    timeout_seconds: float | None = None
+
+
+class DiscoveryProbeRequest(BaseModel):
+    host: str
+    port: int = 80
+    username: str = ""
+    password: str = ""
+
+
+class TestStreamRequest(BaseModel):
+    rtsp_url: str
+    timeout_ms: int = 6000

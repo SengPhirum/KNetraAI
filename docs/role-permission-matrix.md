@@ -8,6 +8,8 @@
 | Camera create/update | yes | yes | no | no |
 | Camera start/stop | yes | yes | yes | no |
 | Camera delete | yes | no | no | no |
+| Camera ONVIF discovery/probe/test | yes | yes | no | no |
+| Camera live stream view | yes | yes | yes | yes |
 | Person list/view | yes | yes | yes | yes |
 | Person create/update | yes | yes | yes | no |
 | Person bulk import/sync | yes | yes | no | no |

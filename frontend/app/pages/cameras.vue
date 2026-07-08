@@ -8,19 +8,27 @@
       <button class="btn secondary" type="button" @click="showHelp = !showHelp">{{ showHelp ? 'Hide Camera Setup Help' : 'Camera Setup Help' }}</button>
     </div>
 
+    <CameraDiscoveryPanel @added="load" />
+
     <div class="card" style="margin-bottom: 1rem;">
-      <h2 class="card-title">Add Camera</h2>
-      <form class="form-grid" @submit.prevent="createCamera">
+      <h2 class="card-title">{{ editingId ? 'Edit Camera' : 'Add Camera Manually' }}</h2>
+      <form class="form-grid" @submit.prevent="saveCamera">
         <div><label class="label">Name</label><input v-model="form.name" class="input" required /></div>
         <div><label class="label">Branch</label><input v-model="form.branch" class="input" /></div>
         <div><label class="label">Location</label><input v-model="form.location" class="input" /></div>
         <div class="full-row">
           <label class="label">RTSP URL</label>
           <input v-model="form.rtsp_url" class="input" placeholder="rtsp://user:pass@ip:554/stream" required />
-          <small class="hint">Not sure about the URL? Open Camera Setup Help for brand templates (Hikvision, EZVIZ, Dahua, ...).</small>
+          <small class="hint">Not sure about the URL? Open Camera Setup Help for brand templates (Hikvision, EZVIZ, Dahua, ...), or use Discover Cameras above to pick a channel instead.</small>
         </div>
-        <div><button class="btn" type="submit">Add Camera</button></div>
+        <div class="btn-row">
+          <button class="btn" type="submit">{{ editingId ? 'Save Camera' : 'Add Camera' }}</button>
+          <button class="btn secondary" type="button" :disabled="testing" @click="testConnection">{{ testing ? 'Testing...' : 'Test Connection' }}</button>
+          <button v-if="editingId" class="btn secondary" type="button" @click="resetForm">Cancel</button>
+        </div>
       </form>
+      <p v-if="testResult?.ok" class="notice">Connected - {{ testResult.width }}x{{ testResult.height }}</p>
+      <p v-if="testResult && !testResult.ok" class="error">{{ testResult.error }}</p>
       <p v-if="error" class="error">{{ error }}</p>
     </div>
 
@@ -79,17 +87,19 @@
 
     <div class="table-wrap">
       <table class="table">
-        <thead><tr><th>Name</th><th>Branch</th><th>Location</th><th>Status</th><th>RTSP</th><th>Actions</th></tr></thead>
+        <thead><tr><th>Name</th><th>Branch</th><th>Location</th><th>Source</th><th>Status</th><th>RTSP</th><th>Actions</th></tr></thead>
         <tbody>
-          <tr v-if="!cameras.length"><td colspan="6" class="empty-row">No cameras yet. Add your first camera above.</td></tr>
+          <tr v-if="!cameras.length"><td colspan="7" class="empty-row">No cameras yet. Add your first camera above.</td></tr>
           <tr v-for="camera in cameras" :key="camera.id">
             <td style="font-weight: 600;">{{ camera.name }}</td>
             <td>{{ camera.branch || '-' }}</td>
             <td>{{ camera.location || '-' }}</td>
+            <td><span class="badge" :class="camera.source === 'onvif' ? 'info' : ''">{{ camera.source === 'onvif' ? 'ONVIF' : 'Manual' }}</span></td>
             <td><span class="badge dot" :class="statusClass(camera.status)">{{ camera.status }}</span></td>
             <td class="truncate" :title="camera.rtsp_url">{{ camera.rtsp_url }}</td>
             <td>
               <div class="btn-row">
+                <button class="btn sm secondary" @click="edit(camera)">Edit</button>
                 <button class="btn sm" @click="start(camera.id)">Start</button>
                 <button class="btn sm secondary" @click="stop(camera.id)">Stop</button>
                 <button class="btn sm danger" @click="remove(camera.id)">Delete</button>
@@ -108,6 +118,9 @@ const cameras = ref<any[]>([])
 const error = ref('')
 const showHelp = ref(false)
 const form = reactive({ name: '', branch: '', location: '', rtsp_url: '' })
+const editingId = ref<string | null>(null)
+const testing = ref(false)
+const testResult = ref<{ ok: boolean; width?: number; height?: number; error?: string } | null>(null)
 
 const rtspTemplates = [
   { brand: 'Hikvision / HiLook / Annke', url: 'rtsp://user:pass@CAMERA_IP:554/Streaming/Channels/101' },
@@ -124,19 +137,81 @@ const useTemplate = (url: string) => {
   window.scrollTo({ top: 0, behavior: 'smooth' })
 }
 
-const statusClass = (status: string) => status === 'running' ? 'success' : status === 'error' ? 'danger' : ''
+const resetForm = () => {
+  editingId.value = null
+  testResult.value = null
+  Object.assign(form, { name: '', branch: '', location: '', rtsp_url: '' })
+}
 
-const load = async () => { cameras.value = await apiFetch('/cameras') }
-const createCamera = async () => {
+const edit = (camera: any) => {
+  error.value = ''
+  testResult.value = null
+  editingId.value = camera.id
+  Object.assign(form, {
+    name: camera.name || '',
+    branch: camera.branch || '',
+    location: camera.location || '',
+    rtsp_url: camera.rtsp_url || ''
+  })
+  window.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
+const statusClass = (status: string) => {
+  if (status === 'running') return 'success'
+  if (status === 'connecting' || status === 'starting' || status === 'reconnecting') return 'warning'
+  if (status === 'error') return 'danger'
+  return ''
+}
+
+const testConnection = async () => {
+  if (!form.rtsp_url) { error.value = 'Enter an RTSP URL first.'; return }
+  testing.value = true
+  testResult.value = null
   error.value = ''
   try {
-    await apiFetch('/cameras', { method: 'POST', body: form })
-    Object.assign(form, { name: '', branch: '', location: '', rtsp_url: '' })
+    testResult.value = await apiFetch('/cameras/test-stream', { method: 'POST', body: { rtsp_url: form.rtsp_url } })
+  } catch (e: any) {
+    testResult.value = { ok: false, error: e?.data?.detail || e.message }
+  } finally {
+    testing.value = false
+  }
+}
+
+const load = async () => { cameras.value = await apiFetch('/cameras') }
+const saveCamera = async () => {
+  error.value = ''
+  try {
+    if (editingId.value) {
+      await apiFetch(`/cameras/${editingId.value}`, { method: 'PUT', body: form })
+    } else {
+      await apiFetch('/cameras', { method: 'POST', body: form })
+    }
+    resetForm()
     await load()
   } catch (e: any) { error.value = e?.data?.detail || e.message }
 }
-const start = async (id: string) => { await apiFetch(`/cameras/${id}/start`, { method: 'POST' }); await load() }
-const stop = async (id: string) => { await apiFetch(`/cameras/${id}/stop`, { method: 'POST' }); await load() }
-const remove = async (id: string) => { if (confirm('Delete camera?')) { await apiFetch(`/cameras/${id}`, { method: 'DELETE' }); await load() } }
+const start = async (id: string) => {
+  error.value = ''
+  try {
+    await apiFetch(`/cameras/${id}/start`, { method: 'POST' })
+    await load()
+  } catch (e: any) { error.value = e?.data?.detail || e.message }
+}
+const stop = async (id: string) => {
+  error.value = ''
+  try {
+    await apiFetch(`/cameras/${id}/stop`, { method: 'POST' })
+    await load()
+  } catch (e: any) { error.value = e?.data?.detail || e.message }
+}
+const remove = async (id: string) => {
+  if (!confirm('Delete camera?')) return
+  error.value = ''
+  try {
+    await apiFetch(`/cameras/${id}`, { method: 'DELETE' })
+    if (editingId.value === id) resetForm()
+    await load()
+  } catch (e: any) { error.value = e?.data?.detail || e.message }
+}
 onMounted(load)
 </script>

@@ -46,6 +46,9 @@ class CameraCreate(BaseModel):
     location: str | None = None
     rtsp_url: str
     enabled: bool = True
+    source: Literal["manual", "onvif"] = "manual"
+    onvif_host: str | None = None
+    onvif_profile_token: str | None = None
 
 
 class CameraUpdate(BaseModel):
@@ -54,6 +57,22 @@ class CameraUpdate(BaseModel):
     location: str | None = None
     rtsp_url: str | None = None
     enabled: bool | None = None
+
+
+class CameraDiscoverRequest(BaseModel):
+    timeout_seconds: float | None = None
+
+
+class CameraProbeRequest(BaseModel):
+    host: str
+    port: int = 80
+    username: str = ""
+    password: str = ""
+
+
+class CameraTestStreamRequest(BaseModel):
+    rtsp_url: str
+    timeout_ms: int = 6000
 
 
 class PersonCreate(BaseModel):

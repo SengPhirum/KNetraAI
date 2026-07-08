@@ -28,6 +28,9 @@ class CameraWorker:
         self.status = "stopped"
         self.last_error: str | None = None
         self.last_greeting_at: dict[str, float] = {}
+        self.latest_jpeg: bytes | None = None
+        self.frame_version = 0
+        self._frame_condition = asyncio.Condition()
 
     async def start(self) -> None:
         if self.running:
@@ -39,6 +42,8 @@ class CameraWorker:
     async def stop(self) -> None:
         self.running = False
         self.status = "stopped"
+        async with self._frame_condition:
+            self._frame_condition.notify_all()
         if self.task:
             self.task.cancel()
             try:
@@ -70,6 +75,7 @@ class CameraWorker:
                     ok, frame = await asyncio.to_thread(cap.read)
                     if not ok or frame is None:
                         raise RuntimeError("Camera frame read failed")
+                    await self._publish_frame(frame)
                     now = monotonic()
                     if now - last_processed < min_interval:
                         await asyncio.sleep(0.01)
@@ -89,6 +95,50 @@ class CameraWorker:
                 if cap is not None:
                     cap.release()
         self.status = "stopped"
+
+    async def _publish_frame(self, frame) -> None:
+        jpeg = await asyncio.to_thread(self._encode_frame, frame)
+        if jpeg is None:
+            return
+        async with self._frame_condition:
+            self.latest_jpeg = jpeg
+            self.frame_version += 1
+            self._frame_condition.notify_all()
+
+    @staticmethod
+    def _encode_frame(frame) -> bytes | None:
+        height, width = frame.shape[:2]
+        if width > settings.stream_max_width > 0:
+            scale = settings.stream_max_width / width
+            frame = cv2.resize(frame, (settings.stream_max_width, int(height * scale)))
+        ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), int(settings.stream_jpeg_quality)])
+        return buf.tobytes() if ok else None
+
+    async def stream_frames(self):
+        """Async generator of multipart/x-mixed-replace JPEG chunks for the live view."""
+        last_seen = -1
+        while self.running:
+            async with self._frame_condition:
+                try:
+                    await asyncio.wait_for(
+                        self._frame_condition.wait_for(
+                            lambda: self.frame_version != last_seen or not self.running
+                        ),
+                        timeout=10,
+                    )
+                except asyncio.TimeoutError:
+                    continue
+                if not self.running:
+                    break
+                last_seen = self.frame_version
+                jpeg = self.latest_jpeg
+            if not jpeg:
+                continue
+            yield (
+                b"--frame\r\n"
+                b"Content-Type: image/jpeg\r\n"
+                b"Content-Length: " + str(len(jpeg)).encode() + b"\r\n\r\n" + jpeg + b"\r\n"
+            )
 
     async def _handle_face(self, frame, face: FaceResult) -> None:
         recognition = await self.backend.recognize(face.embedding)

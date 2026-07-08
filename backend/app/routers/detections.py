@@ -71,36 +71,60 @@ async def list_detection_events(
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     person_type: str | None = None,
+    camera_id: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    q: str | None = None,
+    has_snapshot: bool | None = None,
     user=Depends(require_roles("Admin", "Manager", "Operator", "Viewer")),
 ):
+    values: list = []
+    clauses: list[str] = []
+
+    def add_clause(sql: str, value) -> None:
+        values.append(value)
+        clauses.append(sql.format(f"${len(values)}"))
+
     if person_type:
-        rows = await fetch(
+        add_clause("de.person_type = {}", person_type)
+    if camera_id:
+        add_clause("de.camera_id = {}::uuid", camera_id)
+    if date_from:
+        add_clause("de.detected_at >= {}::date", date_from)
+    if date_to:
+        add_clause("de.detected_at < ({}::date + interval '1 day')", date_to)
+    if has_snapshot is True:
+        clauses.append("de.snapshot_path IS NOT NULL")
+    elif has_snapshot is False:
+        clauses.append("de.snapshot_path IS NULL")
+    if q:
+        values.append(f"%{q}%")
+        clauses.append(
+            f"""
+            (
+                c.name ILIKE ${len(values)}
+                OR p.full_name ILIKE ${len(values)}
+                OR de.greeting ILIKE ${len(values)}
+                OR de.person_type ILIKE ${len(values)}
+                OR de.gender_estimate ILIKE ${len(values)}
+            )
             """
-            SELECT de.*, c.name AS camera_name, p.full_name AS person_name
-            FROM detection_events de
-            LEFT JOIN cameras c ON c.id = de.camera_id
-            LEFT JOIN persons p ON p.id = de.person_id
-            WHERE de.person_type = $1
-            ORDER BY de.detected_at DESC
-            LIMIT $2 OFFSET $3
-            """,
-            person_type,
-            limit,
-            offset,
         )
-    else:
-        rows = await fetch(
-            """
-            SELECT de.*, c.name AS camera_name, p.full_name AS person_name
-            FROM detection_events de
-            LEFT JOIN cameras c ON c.id = de.camera_id
-            LEFT JOIN persons p ON p.id = de.person_id
-            ORDER BY de.detected_at DESC
-            LIMIT $1 OFFSET $2
-            """,
-            limit,
-            offset,
-        )
+
+    where = "WHERE " + " AND ".join(clauses) if clauses else ""
+    values.extend([limit, offset])
+    rows = await fetch(
+        f"""
+        SELECT de.*, c.name AS camera_name, p.full_name AS person_name
+        FROM detection_events de
+        LEFT JOIN cameras c ON c.id = de.camera_id
+        LEFT JOIN persons p ON p.id = de.person_id
+        {where}
+        ORDER BY de.detected_at DESC
+        LIMIT ${len(values) - 1} OFFSET ${len(values)}
+        """,
+        *values,
+    )
     return rows_to_dicts(rows)
 
 
@@ -204,6 +228,10 @@ async def within_detection_schedule() -> bool:
 async def create_detection_event(payload: DetectionEventCreate):
     if not await within_detection_schedule():
         return {"skipped": "outside_schedule"}
+    if payload.camera_id:
+        camera = await fetchrow("SELECT id FROM cameras WHERE id = $1::uuid", payload.camera_id)
+        if camera is None:
+            return {"skipped": "camera_not_found"}
     row = await fetchrow(
         """
         INSERT INTO detection_events (

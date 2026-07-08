@@ -2,7 +2,8 @@
 
 KNetraAI ("netra" = eye) is a CCTV-connected Vision AI system. The first module is **Walk-in Greeting AI**:
 
-- Connect RTSP/IP cameras (guided setup for Hikvision, EZVIZ, Dahua, Tapo, and more).
+- Connect RTSP/IP cameras (guided setup for Hikvision, EZVIZ, Dahua, Tapo, and more), or connect a camera/NVR over ONVIF and pick channels from a list instead of typing RTSP URLs.
+- Real-time CCTV-style live view (MJPEG) with a multi-camera grid, layout switcher, and fullscreen per-camera focus.
 - Detect faces from live video.
 - Register staff and customers with face photos, CSV import, or HR/CRM API sync.
 - Generate 512-dimensional embeddings.

@@ -48,6 +48,9 @@ CREATE TABLE IF NOT EXISTS cameras (
     enabled BOOLEAN NOT NULL DEFAULT TRUE,
     status TEXT NOT NULL DEFAULT 'stopped',
     last_seen_at TIMESTAMPTZ,
+    source TEXT NOT NULL DEFAULT 'manual' CHECK (source IN ('manual', 'onvif')),
+    onvif_host TEXT,
+    onvif_profile_token TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );

@@ -7,6 +7,9 @@ numpy>=2.5
 # OpenCV 5.x removed the legacy Haar CascadeClassifier used by the dev provider.
 opencv-python-headless>=4.13,<5
 python-multipart>=0.0.32
+# ONVIF discovery/channel picker (camera setup) - pure Python + lxml, no extra system deps expected.
+onvif-zeep-async>=3.2
+wsdiscovery>=2.1
 # Production deep-learning provider. Uncomment for real InsightFace embeddings.
 # insightface>=0.7.3
 # onnxruntime>=1.18

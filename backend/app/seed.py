@@ -3,7 +3,21 @@ from .db import execute, fetchrow
 from .security import hash_password
 
 
+async def run_migrations() -> None:
+    """Idempotent schema upgrades for deployments created before a given column existed.
+
+    This project has no migration framework - database/init.sql only runs via
+    docker-entrypoint-initdb.d on a brand-new database. Existing deployments upgrade
+    in place via these safe-to-repeat statements.
+    """
+    await execute("ALTER TABLE cameras ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'manual'")
+    await execute("ALTER TABLE cameras ADD COLUMN IF NOT EXISTS onvif_host TEXT")
+    await execute("ALTER TABLE cameras ADD COLUMN IF NOT EXISTS onvif_profile_token TEXT")
+
+
 async def seed_data() -> None:
+    await run_migrations()
+
     roles = [
         ("Admin", "Full access"),
         ("Manager", "Dashboard, reports, and staff/customer profiles"),
