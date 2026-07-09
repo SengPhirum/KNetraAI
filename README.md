@@ -72,7 +72,7 @@ docker compose up --build
 3. Open the app:
 
 ```text
-Frontend: http://localhost:3000
+Frontend: http://localhost:3010
 Backend API docs: http://localhost:8000/docs
 AI service docs: http://localhost:8001/docs
 ```

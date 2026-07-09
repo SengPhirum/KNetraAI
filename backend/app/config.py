@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     storage_dir: str = "/data"
     ai_service_url: str = "http://localhost:8001"
     internal_api_key: str = "change-this-internal-key"
-    cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
+    cors_origins: str = "http://localhost:3010,http://127.0.0.1:3010"
     default_admin_email: str = "admin@example.com"
     default_admin_password: str = "admin123"
     default_admin_name: str = "System Admin"
@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     gender_min_confidence: float = 0.60
 
     # Public URLs used to build OIDC redirects.
-    frontend_base_url: str = "http://localhost:3000"
+    frontend_base_url: str = "http://localhost:3010"
     api_base_url: str = "http://localhost:8000"
 
     # OIDC single sign-on (Keycloak, Authentik, or any OpenID Connect provider).

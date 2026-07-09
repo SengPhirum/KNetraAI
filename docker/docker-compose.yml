@@ -58,7 +58,7 @@ services:
       GREETING_COOLDOWN_SECONDS: ${GREETING_COOLDOWN_SECONDS:-300}
       GENDER_MIN_CONFIDENCE: ${GENDER_MIN_CONFIDENCE:-0.60}
       STORAGE_DIR: /data
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost,http://127.0.0.1,http://localhost:3000,http://127.0.0.1:3000}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost,http://127.0.0.1,http://localhost:3010,http://127.0.0.1:3010}
       TZ: ${TZ:-Asia/Phnom_Penh}
     volumes:
       - storage_data:/data
@@ -125,7 +125,7 @@ services:
     environment:
       NODE_ENV: production
       NITRO_HOST: 0.0.0.0
-      NITRO_PORT: 3000
+      NITRO_PORT: 3010
       NUXT_PUBLIC_API_BASE_URL: ${NUXT_PUBLIC_API_BASE_URL:-/api}
       TZ: ${TZ:-Asia/Phnom_Penh}
     depends_on:

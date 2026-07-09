@@ -22,7 +22,7 @@ This guide explains how to deploy, configure, and use KNetraAI. The first module
 Local quick start URLs:
 
 ```text
-Frontend: http://localhost:3000
+Frontend: http://localhost:3010
 Backend API docs: http://localhost:8000/docs
 AI service docs: http://localhost:8001/docs
 ```

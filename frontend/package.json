@@ -4,9 +4,9 @@
   "private": true,
   "packageManager": "pnpm@11.9.0",
   "scripts": {
-    "dev": "nuxt dev --host 0.0.0.0",
+    "dev": "nuxt dev --host 0.0.0.0 --port 3010",
     "build": "nuxt build",
-    "start": "node .output/server/index.mjs"
+    "start": "node -e \"process.env.NITRO_HOST ||= '0.0.0.0'; process.env.NITRO_PORT ||= '3010'; import('./.output/server/index.mjs').catch((error) => { console.error(error); process.exit(1) })\""
   },
   "dependencies": {
     "@nuxt/ui": "^4.9.0",

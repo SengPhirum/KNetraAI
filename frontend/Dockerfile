@@ -8,6 +8,8 @@ ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
 ENV NPM_CONFIG_STRICT_SSL=$REGISTRY_STRICT_SSL
 ENV PNPM_CONFIG_STRICT_SSL=$REGISTRY_STRICT_SSL
+ENV NITRO_HOST=0.0.0.0
+ENV NITRO_PORT=3010
 
 WORKDIR /app
 RUN npm install -g pnpm@${PNPM_VERSION}
@@ -17,5 +19,5 @@ RUN --mount=type=cache,id=knetraai-frontend-pnpm,target=/pnpm/store \
 COPY . .
 RUN pnpm run build
 
-EXPOSE 3000
+EXPOSE 3010
 CMD ["node", ".output/server/index.mjs"]
