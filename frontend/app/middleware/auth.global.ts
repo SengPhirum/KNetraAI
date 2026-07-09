@@ -1,6 +1,7 @@
 export default defineNuxtRouteMiddleware((to) => {
-  if (!process.client) return
+  if (!import.meta.client) return
   if (to.path === '/login') return
-  const token = localStorage.getItem('token')
-  if (!token) return navigateTo('/login')
+  const { sessionStatus, redirectToLogin } = useApi()
+  const status = sessionStatus()
+  if (!status.valid) return redirectToLogin(status.reason, to.fullPath)
 })

@@ -52,6 +52,7 @@ services:
     environment:
       BACKEND_URL: ${BACKEND_URL:-http://backend:8000}
       STORAGE_DIR: /data
+      ORT_LOG_SEVERITY_LEVEL: ${ORT_LOG_SEVERITY_LEVEL:-3}
     ports:
       - "8001:8001"
     volumes:

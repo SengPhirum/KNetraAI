@@ -91,16 +91,17 @@
         </p>
         <p class="section-text" v-if="!isDeepLearning">
           The system is running the lightweight OpenCV development provider. It keeps the app runnable without
-          large models, but it is <strong>not real face recognition</strong>. Switch to InsightFace for production.
+          large models, but it is <strong>not reliable CCTV face detection</strong>. Use InsightFace for production.
         </p>
         <details>
-          <summary class="details-title">How to enable InsightFace (deep learning)</summary>
+          <summary class="details-title">InsightFace production checklist</summary>
           <ol class="details-list">
-            <li>In <code>ai-service/requirements.txt</code>, uncomment <code>insightface</code> and <code>onnxruntime</code>.</li>
-            <li>In your <code>.env</code>, set <code>AI_PROVIDER=insightface</code>.</li>
+            <li>In your <code>.env</code>, set <code>AI_PROVIDER=insightface</code> and <code>ALLOW_PROVIDER_FALLBACK=false</code>.</li>
+            <li>Keep <code>INSIGHTFACE_DET_SIZE=960</code> for better small-face detection on CCTV frames.</li>
+            <li>Keep <code>INSIGHTFACE_ENABLE_TILED_DETECTION=true</code> when entrances appear far from the camera.</li>
             <li>Rebuild the AI service: <code>docker compose up -d --build ai-service</code>.</li>
             <li>The first start downloads the model weights (several hundred MB); watch <code>docker logs knetraai-service</code>.</li>
-            <li>This card shows the active provider - confirm it changes from <code>opencv_mock_...</code> to the InsightFace model.</li>
+            <li>This card must show an <code>insightface_...</code> provider before live face detection is considered accurate.</li>
           </ol>
         </details>
       </div>

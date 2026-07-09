@@ -25,6 +25,10 @@ def _raise_for_status(response: httpx.Response) -> None:
     raise HTTPException(status_code=response.status_code, detail=detail)
 
 
+def _ai_service_unavailable(exc: httpx.HTTPError, action: str) -> HTTPException:
+    return HTTPException(status_code=502, detail=f"Could not reach the AI service while {action}: {exc}")
+
+
 def _camera_payload(camera) -> dict:
     return {
         "id": str(camera["id"]),
@@ -295,12 +299,17 @@ async def stream_camera(camera_id: str, user=Depends(get_sse_user)):
 
 @router.post("/discover")
 async def discover_cameras(payload: CameraDiscoverRequest, user=Depends(require_roles("Admin", "Manager"))):
-    async with httpx.AsyncClient(timeout=max(15.0, (payload.timeout_seconds or 0) + 5)) as client:
-        response = await client.post(
-            f"{settings.ai_service_url}/discovery/scan",
-            json=payload.model_dump(),
-            headers={"x-internal-api-key": settings.internal_api_key},
-        )
+    try:
+        async with httpx.AsyncClient(timeout=max(15.0, (payload.timeout_seconds or 0) + 5)) as client:
+            response = await client.post(
+                f"{settings.ai_service_url}/discovery/scan",
+                json=payload.model_dump(),
+                headers={"x-internal-api-key": settings.internal_api_key},
+            )
+    except httpx.TimeoutException as exc:
+        raise HTTPException(status_code=504, detail="ONVIF discovery timed out. Try entering the camera or NVR IP directly.") from exc
+    except httpx.HTTPError as exc:
+        raise _ai_service_unavailable(exc, "scanning for cameras") from exc
     if response.status_code >= 400:
         _raise_for_status(response)
     return response.json()
@@ -310,12 +319,20 @@ async def discover_cameras(payload: CameraDiscoverRequest, user=Depends(require_
 async def probe_camera(payload: CameraProbeRequest, user=Depends(require_roles("Admin", "Manager"))):
     # A single unreachable-host connect attempt can legitimately take ~30s (the ONVIF client library's
     # own connect timeout) before failing, so this must stay comfortably above that.
-    async with httpx.AsyncClient(timeout=45) as client:
-        response = await client.post(
-            f"{settings.ai_service_url}/discovery/probe",
-            json=payload.model_dump(),
-            headers={"x-internal-api-key": settings.internal_api_key},
-        )
+    try:
+        async with httpx.AsyncClient(timeout=45) as client:
+            response = await client.post(
+                f"{settings.ai_service_url}/discovery/probe",
+                json=payload.model_dump(),
+                headers={"x-internal-api-key": settings.internal_api_key},
+            )
+    except httpx.TimeoutException as exc:
+        raise HTTPException(
+            status_code=504,
+            detail="Fetching channels timed out. Check the ONVIF port, credentials, and camera network reachability.",
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise _ai_service_unavailable(exc, "fetching camera channels") from exc
     if response.status_code >= 400:
         _raise_for_status(response)
     return response.json()
@@ -323,12 +340,22 @@ async def probe_camera(payload: CameraProbeRequest, user=Depends(require_roles("
 
 @router.post("/test-stream")
 async def test_camera_stream(payload: CameraTestStreamRequest, user=Depends(require_roles("Admin", "Manager"))):
-    async with httpx.AsyncClient(timeout=(payload.timeout_ms / 1000) + 5) as client:
-        response = await client.post(
-            f"{settings.ai_service_url}/discovery/test-stream",
-            json=payload.model_dump(),
-            headers={"x-internal-api-key": settings.internal_api_key},
-        )
+    timeout_seconds = max(8.0, (payload.timeout_ms / 1000) + 8)
+    timeout = httpx.Timeout(timeout_seconds, connect=5.0, read=timeout_seconds, write=5.0, pool=timeout_seconds)
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            response = await client.post(
+                f"{settings.ai_service_url}/discovery/test-stream",
+                json=payload.model_dump(),
+                headers={"x-internal-api-key": settings.internal_api_key},
+            )
+    except httpx.TimeoutException:
+        return {
+            "ok": False,
+            "error": "Stream test timed out. The channel may be offline, unreachable, or not returning RTSP video.",
+        }
+    except httpx.HTTPError as exc:
+        return {"ok": False, "error": f"Could not reach the stream tester: {exc}"}
     if response.status_code >= 400:
         _raise_for_status(response)
     return response.json()

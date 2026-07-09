@@ -2,14 +2,22 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from typing import Any
 from urllib.parse import quote, unquote, urlsplit
+
+os.environ.setdefault("OPENCV_LOG_LEVEL", "SILENT")
 
 import cv2
 
 from .config import settings
 
 logger = logging.getLogger(__name__)
+
+try:
+    cv2.setLogLevel(0)  # SILENT: keep OpenCV/FFmpeg stream timeout chatter out of normal logs.
+except Exception:  # pragma: no cover - OpenCV builds expose this differently.
+    pass
 
 
 class OnvifError(RuntimeError):

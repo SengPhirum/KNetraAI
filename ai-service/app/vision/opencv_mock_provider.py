@@ -141,13 +141,11 @@ class OpenCVMvpProvider:
             raise ValueError(f"Could not read image: {path}")
         faces = self._detect_faces(image)
         h, w = image.shape[:2]
-        if faces:
-            x, y, fw, fh = max(faces, key=lambda item: item[2] * item[3])
-            crop = image[y : y + fh, x : x + fw]
-            quality = min(1.0, float((fw * fh) / max(1, w * h)) * 4.0)
-        else:
-            crop = image
-            quality = 0.25
+        if not faces:
+            raise ValueError("No face found in image")
+        x, y, fw, fh = max(faces, key=lambda item: item[2] * item[3])
+        crop = image[y : y + fh, x : x + fw]
+        quality = min(1.0, float((fw * fh) / max(1, w * h)) * 4.0)
         return EmbeddingResult(
             embedding=self._embedding_from_crop(crop),
             model_version=self.model_version,
@@ -172,7 +170,7 @@ class OpenCVMvpProvider:
                     embedding=embedding,
                     gender=gender,
                     gender_confidence=gender_conf,
-                    metadata={"provider": self.model_version},
+                    metadata={"provider": self.model_version, "detection_kind": "face"},
                 )
             )
         for x, y, w, h, weight in self._detect_people(frame, faces):

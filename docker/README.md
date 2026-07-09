@@ -97,9 +97,19 @@ rtsp://username:password@192.168.1.50:554/stream1
 
 For local laptop testing with a camera server running on the host, use the host LAN IP instead of `localhost`.
 
+## Face detection provider
+
+The default production template uses `AI_PROVIDER=insightface` with `ALLOW_PROVIDER_FALLBACK=false`, so the AI service does not silently fall back to the weak OpenCV development detector. The first start downloads InsightFace model weights into the container cache.
+
+If the Settings page shows `opencv_mock_...`, accurate CCTV face detection is not active yet. Rebuild the AI service after changing provider settings:
+
+```bash
+docker compose --env-file docker/.env.production -f docker/docker-compose.yml up -d --build ai-service
+```
+
 ## GPU override
 
-The default deployment uses CPU mode and `AI_PROVIDER=opencv_mock` unless changed. For an NVIDIA GPU host, install the NVIDIA Container Toolkit on the host, enable real InsightFace dependencies in `ai-service/requirements.txt`, then run:
+The default deployment uses CPU mode. For an NVIDIA GPU host, install the NVIDIA Container Toolkit on the host, then run:
 
 ```bash
 docker compose --env-file docker/.env.production \

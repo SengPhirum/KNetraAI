@@ -52,7 +52,7 @@
 <script setup lang="ts">
 definePageMeta({ layout: false })
 const route = useRoute()
-const { apiFetch, setToken, apiBaseUrl } = useApi()
+const { apiFetch, setToken, apiBaseUrl, safeRedirectPath } = useApi()
 const { appearance, logoSrc } = useAppearance()
 const email = ref('admin@example.com')
 const password = ref('admin123')
@@ -65,14 +65,14 @@ const methods = ref<any>({ password: true, oidc: { enabled: false }, ldap: { ena
 
 const finishLogin = async (result: any) => {
   setToken(result.access_token)
-  await navigateTo('/')
+  await navigateTo(safeRedirectPath(route.query.redirect), { replace: true })
 }
 
 const login = async () => {
   error.value = ''
   loading.value = true
   try {
-    await finishLogin(await apiFetch('/auth/login', { method: 'POST', body: { email: email.value, password: password.value } }))
+    await finishLogin(await apiFetch('/auth/login', { method: 'POST', authRedirect: false, body: { email: email.value, password: password.value } }))
   } catch (e: any) {
     error.value = e?.data?.detail || e?.message || 'Login failed'
   } finally {
@@ -84,7 +84,7 @@ const ldapLogin = async () => {
   error.value = ''
   loading.value = true
   try {
-    await finishLogin(await apiFetch('/auth/ldap/login', { method: 'POST', body: { username: ldapUsername.value, password: ldapPassword.value } }))
+    await finishLogin(await apiFetch('/auth/ldap/login', { method: 'POST', authRedirect: false, body: { username: ldapUsername.value, password: ldapPassword.value } }))
   } catch (e: any) {
     error.value = e?.data?.detail || e?.message || 'LDAP login failed'
   } finally {
@@ -93,19 +93,23 @@ const ldapLogin = async () => {
 }
 
 const ssoLogin = () => {
-  window.location.href = `${apiBaseUrl}/auth/oidc/login`
+  const redirect = encodeURIComponent(safeRedirectPath(route.query.redirect))
+  window.location.href = `${apiBaseUrl}/auth/oidc/login?redirect=${redirect}`
 }
 
 onMounted(async () => {
-  const ssoToken = route.query.sso_token as string | undefined
-  const ssoError = route.query.sso_error as string | undefined
+  const ssoToken = Array.isArray(route.query.sso_token) ? route.query.sso_token[0] : route.query.sso_token
+  const ssoError = Array.isArray(route.query.sso_error) ? route.query.sso_error[0] : route.query.sso_error
+  const reason = Array.isArray(route.query.reason) ? route.query.reason[0] : route.query.reason
   if (ssoToken) {
     await finishLogin({ access_token: ssoToken })
     return
   }
+  if (reason === 'expired') error.value = 'Your session expired. Please sign in again.'
+  else if (reason === 'unauthorized' || reason === 'invalid') error.value = 'Please sign in again.'
   if (ssoError) error.value = ssoError
   try {
-    methods.value = await apiFetch('/auth/methods')
+    methods.value = await apiFetch('/auth/methods', { authRedirect: false })
   } catch {
     /* backend down - keep password form visible */
   }

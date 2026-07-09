@@ -5,6 +5,8 @@ services:
   ai-service:
     environment:
       AI_PROVIDER: ${AI_PROVIDER:-insightface}
+      INSIGHTFACE_PROVIDERS: ${INSIGHTFACE_PROVIDERS:-CUDAExecutionProvider,CPUExecutionProvider}
+      INSIGHTFACE_CTX_ID: ${INSIGHTFACE_CTX_ID:-0}
     deploy:
       resources:
         reservations:

@@ -120,16 +120,27 @@ def _oidc_redirect_uri() -> str:
     return settings.api_base_url.rstrip("/") + "/auth/oidc/callback"
 
 
+def _safe_frontend_path(value: str = "") -> str:
+    if not value or not value.startswith("/") or value.startswith("//") or value.startswith("/login"):
+        return "/"
+    return value
+
+
 def _login_redirect(**params: str) -> RedirectResponse:
     return RedirectResponse(settings.frontend_base_url.rstrip("/") + "/login?" + urlencode(params))
 
 
 @router.get("/oidc/login")
-async def oidc_login():
+async def oidc_login(redirect: str = ""):
     oidc = (await get_auth_config())["oidc"]
     config = await _oidc_config(oidc)
     state = jwt.encode(
-        {"purpose": "oidc_state", "nonce": secrets.token_urlsafe(16), "exp": int(time.time()) + 600},
+        {
+            "purpose": "oidc_state",
+            "nonce": secrets.token_urlsafe(16),
+            "redirect": _safe_frontend_path(redirect),
+            "exp": int(time.time()) + 600,
+        },
         settings.jwt_secret,
         algorithm=settings.jwt_algorithm,
     )
@@ -192,7 +203,7 @@ async def oidc_callback(code: str = "", state: str = "", error: str = "", error_
     except HTTPException as exc:
         return _login_redirect(sso_error=str(exc.detail))
     result = _token_response(row)
-    return _login_redirect(sso_token=result["access_token"])
+    return _login_redirect(sso_token=result["access_token"], redirect=_safe_frontend_path(state_payload.get("redirect", "")))
 
 
 # --------------------------------------------------------------------------

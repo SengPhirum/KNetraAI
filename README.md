@@ -133,13 +133,15 @@ See `docker/README.md` for logs, backup, restore, GPU override, and HTTPS notes.
 
 The AI service supports provider abstraction:
 
+- `AI_PROVIDER=insightface` is the intended production path for deep-learning face detection and ArcFace-style embeddings. The default detector size is 960px to improve small-face detection on CCTV frames.
 - `AI_PROVIDER=opencv_mock` is the lightweight development mode. It uses OpenCV Haar face detection and a deterministic 512-value embedding fallback. This is useful for UI/API development but not production face recognition.
-- `AI_PROVIDER=insightface` uses InsightFace when the optional dependencies are installed. This is the intended production path for deep-learning face detection and ArcFace-style embeddings.
 
-To use InsightFace in the AI container, edit `ai-service/requirements.txt` and uncomment or add InsightFace dependencies, then set:
+To use the accurate provider, keep:
 
 ```env
 AI_PROVIDER=insightface
+ALLOW_PROVIDER_FALLBACK=false
+INSIGHTFACE_DET_SIZE=960
 ```
 
 Production recognition quality depends on camera angle, lighting, face image quality, enrollment photos, model choice, and threshold tuning.

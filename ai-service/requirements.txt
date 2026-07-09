@@ -3,13 +3,17 @@ uvicorn[standard]>=0.50
 pydantic>=2.13
 pydantic-settings>=2.14
 httpx>=0.28
-numpy>=2.5
+numpy>=1.26,<2.3
 # OpenCV 5.x removed the legacy Haar CascadeClassifier used by the dev provider.
 opencv-python-headless>=4.13,<5
 python-multipart>=0.0.32
 # ONVIF discovery/channel picker (camera setup) - pure Python + lxml, no extra system deps expected.
 onvif-zeep-async>=3.2
 wsdiscovery>=2.1
-# Production deep-learning provider. Uncomment for real InsightFace embeddings.
-# insightface>=0.7.3
-# onnxruntime>=1.18
+# Production deep-learning face detector and ArcFace-style embeddings.
+Cython>=3.0
+insightface>=0.7.3
+# insightface 0.7.x still calls skimage.transform.SimilarityTransform.estimate();
+# scikit-image 0.26 emits a noisy FutureWarning for that API.
+scikit-image>=0.25,<0.26
+onnxruntime>=1.18

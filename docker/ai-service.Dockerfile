@@ -1,4 +1,4 @@
-FROM python:3.13-slim AS runtime
+FROM python:3.11-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -10,6 +10,8 @@ WORKDIR /app
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
        tini \
+       build-essential \
+       ca-certificates \
        ffmpeg \
        libglib2.0-0 \
        libgl1 \
