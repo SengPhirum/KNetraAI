@@ -35,7 +35,7 @@ services:
       AI_SERVICE_URL: ${AI_SERVICE_URL:-http://ai-service:8001}
       STORAGE_DIR: /data
     ports:
-      - "8000:8000"
+      - "${BACKEND_HOST_PORT:-8010}:8000"
     volumes:
       - ./storage:/data
     depends_on:
@@ -66,7 +66,8 @@ services:
     container_name: knetraai-frontend
     restart: unless-stopped
     environment:
-      NUXT_PUBLIC_API_BASE_URL: ${NUXT_PUBLIC_API_BASE_URL:-http://localhost:8000}
+      NUXT_PUBLIC_API_BASE_URL: ${NUXT_PUBLIC_API_BASE_URL:-}
+      NUXT_PUBLIC_API_PORT: ${BACKEND_HOST_PORT:-8010}
     ports:
       - "3010:3010"
     depends_on:

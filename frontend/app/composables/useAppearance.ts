@@ -13,12 +13,12 @@ export const APPEARANCE_DEFAULTS: Appearance = {
 }
 
 export const useAppearance = () => {
-  const config = useRuntimeConfig()
+  const apiBaseUrl = useApiBaseUrl()
   const appearance = useState<Appearance>('appearance', () => ({ ...APPEARANCE_DEFAULTS }))
 
   const logoSrc = computed(() =>
     appearance.value.logo_url
-      ? `${config.public.apiBaseUrl}/files/${appearance.value.logo_url}`
+      ? `${apiBaseUrl}/files/${appearance.value.logo_url}`
       : '/logo.svg'
   )
 
@@ -31,7 +31,7 @@ export const useAppearance = () => {
 
   const refresh = async () => {
     try {
-      const data = await $fetch<Appearance>('/public/appearance', { baseURL: config.public.apiBaseUrl as string })
+      const data = await $fetch<Appearance>('/public/appearance', { baseURL: apiBaseUrl })
       appearance.value = { ...APPEARANCE_DEFAULTS, ...data }
     } catch {
       /* backend unreachable - keep defaults */

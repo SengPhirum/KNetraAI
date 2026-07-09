@@ -36,8 +36,8 @@ const safeRedirectPath = (value?: unknown) => {
 }
 
 export const useApi = () => {
-  const config = useRuntimeConfig()
   const route = useRoute()
+  const apiBaseUrl = useApiBaseUrl()
   const token = useState<string | null>('auth-token', () => {
     if (import.meta.client) return localStorage.getItem('token')
     return null
@@ -108,7 +108,7 @@ export const useApi = () => {
 
     try {
       return await $fetch<T>(path, {
-        baseURL: config.public.apiBaseUrl as string,
+        baseURL: apiBaseUrl,
         ...fetchOptions,
         headers
       })
@@ -138,6 +138,6 @@ export const useApi = () => {
     sessionStatus,
     redirectToLogin,
     safeRedirectPath,
-    apiBaseUrl: config.public.apiBaseUrl as string
+    apiBaseUrl
   }
 }

@@ -22,7 +22,7 @@ class Settings(BaseSettings):
 
     # Public URLs used to build OIDC redirects.
     frontend_base_url: str = "http://localhost:3010"
-    api_base_url: str = "http://localhost:8000"
+    api_base_url: str = "http://localhost:8010"
 
     # OIDC single sign-on (Keycloak, Authentik, or any OpenID Connect provider).
     oidc_enabled: bool = False

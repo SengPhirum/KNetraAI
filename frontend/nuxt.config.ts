@@ -19,7 +19,11 @@ export default defineNuxtConfig({
   },
   runtimeConfig: {
     public: {
-      apiBaseUrl: process.env.NUXT_PUBLIC_API_BASE_URL || 'http://localhost:8000'
+      // Leave apiBaseUrl unset to auto-detect from the browser's current host
+      // (works for localhost, LAN IP, or any hostname). Set NUXT_PUBLIC_API_BASE_URL
+      // to force a specific backend URL instead (e.g. behind a reverse proxy).
+      apiBaseUrl: process.env.NUXT_PUBLIC_API_BASE_URL || '',
+      apiPort: process.env.NUXT_PUBLIC_API_PORT || '8000'
     }
   }
 })
