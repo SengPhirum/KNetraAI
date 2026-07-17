@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
 import os
 from typing import Any
@@ -315,6 +316,18 @@ def _inject_credentials(rtsp_url: str, username: str, password: str) -> str:
     return parsed._replace(netloc=netloc).geturl()
 
 
+def _encode_thumbnail(frame, max_width: int, quality: int) -> str | None:
+    """JPEG-encode a (optionally downscaled) frame as a data URI for direct <img src> use."""
+    height, width = frame.shape[:2]
+    if max_width > 0 and width > max_width:
+        scale = max_width / width
+        frame = cv2.resize(frame, (max_width, max(1, int(height * scale))), interpolation=cv2.INTER_AREA)
+    ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
+    if not ok:
+        return None
+    return "data:image/jpeg;base64," + base64.b64encode(buf.tobytes()).decode("ascii")
+
+
 def _test_stream_sync(rtsp_url: str, timeout_ms: int) -> dict[str, Any]:
     # Timeouts must be passed at open time (via the params overload) - setting them
     # on the VideoCapture object after construction is too late, since the connection
@@ -331,7 +344,10 @@ def _test_stream_sync(rtsp_url: str, timeout_ms: int) -> dict[str, Any]:
         if not ok or frame is None:
             return {"ok": False, "error": "Connected, but no video frame could be read"}
         height, width = frame.shape[:2]
-        return {"ok": True, "width": int(width), "height": int(height)}
+        # Reuse this same frame for the thumbnail - it's already the one cost of testing
+        # the channel, so there is no second RTSP connection to pay for a preview image.
+        thumbnail = _encode_thumbnail(frame, settings.onvif_thumbnail_max_width, settings.onvif_thumbnail_jpeg_quality)
+        return {"ok": True, "width": int(width), "height": int(height), "thumbnail": thumbnail}
     finally:
         cap.release()
 

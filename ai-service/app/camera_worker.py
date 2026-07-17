@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from datetime import datetime
 from pathlib import Path
 from time import monotonic
@@ -9,6 +10,7 @@ from typing import Any
 from uuid import uuid4
 
 import cv2
+import numpy as np
 
 from .backend_client import BackendClient
 from .config import settings
@@ -16,6 +18,60 @@ from .schemas import CameraStartRequest
 from .vision.base import FaceResult, VisionProvider
 
 logger = logging.getLogger(__name__)
+
+
+class _LatestFrameReader:
+    """Reads an RTSP stream on a dedicated thread and keeps only the newest frame.
+
+    A plain synchronous ``cap.read()`` loop backs up: if AI processing takes
+    longer than the camera's frame interval, OpenCV's internal buffer (or the
+    RTSP source itself) queues up unread frames, and the live view/detections
+    drift further and further behind wall-clock time. Reading continuously on
+    its own thread and always exposing only the latest frame keeps the worker
+    loop free to process/publish at whatever rate it can sustain without ever
+    falling behind.
+    """
+
+    def __init__(self, rtsp_url: str) -> None:
+        self._cap = cv2.VideoCapture(rtsp_url)
+        try:
+            self._cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        except Exception:
+            pass
+        self._lock = threading.Lock()
+        self._frame: np.ndarray | None = None
+        self._frame_id = 0
+        self._error: str | None = None
+        self._running = self._cap.isOpened()
+        self._thread: threading.Thread | None = None
+        if self._running:
+            self._thread = threading.Thread(target=self._loop, daemon=True)
+            self._thread.start()
+
+    def isOpened(self) -> bool:
+        return self._cap.isOpened()
+
+    def _loop(self) -> None:
+        while self._running:
+            ok, frame = self._cap.read()
+            if not ok or frame is None:
+                with self._lock:
+                    self._error = "Camera frame read failed"
+                    self._running = False
+                return
+            with self._lock:
+                self._frame = frame
+                self._frame_id += 1
+
+    def latest(self) -> tuple[int, np.ndarray | None, str | None]:
+        with self._lock:
+            return self._frame_id, self._frame, self._error
+
+    def release(self) -> None:
+        self._running = False
+        if self._thread is not None:
+            self._thread.join(timeout=2)
+        self._cap.release()
 
 
 class CameraWorker:
@@ -73,20 +129,32 @@ class CameraWorker:
     async def _run(self) -> None:
         min_interval = 1.0 / max(0.1, float(settings.process_fps))
         while self.running:
-            cap = None
+            reader: _LatestFrameReader | None = None
             try:
                 self.status = "connecting"
-                cap = cv2.VideoCapture(self.camera.rtsp_url)
-                if not cap.isOpened():
+                reader = await asyncio.to_thread(_LatestFrameReader, self.camera.rtsp_url)
+                if not reader.isOpened():
                     raise RuntimeError("Could not open camera stream")
                 self.status = "running"
                 last_processed = 0.0
+                last_frame_id = -1
+                motion_reference: np.ndarray | None = None
                 while self.running:
-                    ok, frame = await asyncio.to_thread(cap.read)
-                    if not ok or frame is None:
-                        raise RuntimeError("Camera frame read failed")
+                    frame_id, frame, error = reader.latest()
+                    if error:
+                        raise RuntimeError(error)
+                    if frame is None or frame_id == last_frame_id:
+                        await asyncio.sleep(0.01)
+                        continue
+                    last_frame_id = frame_id
+
                     now = monotonic()
-                    if self.ai_enabled and now - last_processed >= min_interval:
+                    should_process = self.ai_enabled and now - last_processed >= min_interval
+                    if should_process and settings.motion_gating_enabled:
+                        should_process, motion_reference = self._gate_on_motion(
+                            frame, motion_reference, now, last_processed
+                        )
+                    if should_process:
                         last_processed = now
                         faces = await asyncio.to_thread(self.provider.detect_and_embed, frame)
                         overlays: list[dict[str, Any]] = []
@@ -103,8 +171,6 @@ class CameraWorker:
                         self.latest_faces = []
 
                     await self._publish_frame(frame)
-                    if self.ai_enabled and now - last_processed < min_interval:
-                        await asyncio.sleep(0.01)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -113,9 +179,28 @@ class CameraWorker:
                 logger.warning("Camera %s error: %s", self.camera.id, exc)
                 await asyncio.sleep(3)
             finally:
-                if cap is not None:
-                    cap.release()
+                if reader is not None:
+                    await asyncio.to_thread(reader.release)
         self.status = "stopped"
+
+    @staticmethod
+    def _gate_on_motion(
+        frame: np.ndarray,
+        reference: np.ndarray | None,
+        now: float,
+        last_processed: float,
+    ) -> tuple[bool, np.ndarray]:
+        """Cheap grayscale-diff motion gate for skipping AI inference on an
+        unchanged scene, with a periodic idle poll as a safety net so a person
+        who walks in and immediately holds still is still caught."""
+        small = cv2.resize(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), (160, 90))
+        if reference is None:
+            return True, small
+        diff = cv2.absdiff(small, reference)
+        changed_ratio = float(np.count_nonzero(diff > 25)) / diff.size
+        motion_detected = changed_ratio >= settings.motion_gating_min_area_ratio
+        idle_timeout = now - last_processed >= settings.motion_gating_idle_interval_seconds
+        return (motion_detected or idle_timeout), small
 
     async def _publish_frame(self, frame) -> None:
         overlays = list(self.latest_faces) if self.ai_enabled else []

@@ -11,7 +11,8 @@ import cv2
 import numpy as np
 
 from ..config import settings
-from .base import EmbeddingResult, FaceResult, normalize_vector
+from .base import EmbeddingResult, FaceResult, dedupe_faces, is_valid_face_bbox, normalize_vector
+from .hw import resolve_onnx_providers
 
 
 class InsightFaceProvider:
@@ -20,29 +21,37 @@ class InsightFaceProvider:
     Requires optional packages:
         insightface
         onnxruntime or onnxruntime-gpu
+
+    ``det_size`` and ``enable_tiling`` can be overridden per instance so callers
+    (e.g. the YOLO person cascade) can run a second, cheaper-tuned instance for
+    face detection on already-cropped person regions.
     """
 
     model_version = "insightface_arcface_512"
 
-    def __init__(self) -> None:
+    def __init__(self, det_size: int | None = None, enable_tiling: bool | None = None) -> None:
         with self._quiet_native_startup_output():
             self._configure_onnxruntime_logging()
 
             from insightface.app import FaceAnalysis
 
             self._configure_model_downloader()
-            providers = [item.strip() for item in settings.insightface_providers.split(",") if item.strip()]
-            det_size = max(320, int(settings.insightface_det_size))
-            self.model_version = f"insightface_{settings.insightface_model}_{det_size}"
+            providers, auto_ctx_id = resolve_onnx_providers(settings.insightface_providers)
+            ctx_id = auto_ctx_id if int(settings.insightface_ctx_id) == -2 else int(settings.insightface_ctx_id)
+            self._enable_tiling = (
+                settings.insightface_enable_tiled_detection if enable_tiling is None else enable_tiling
+            )
+            resolved_det_size = max(320, int(det_size if det_size is not None else settings.insightface_det_size))
+            self.model_version = f"insightface_{settings.insightface_model}_{resolved_det_size}"
             self.app = FaceAnalysis(
                 name=settings.insightface_model,
                 root=settings.insightface_model_root,
-                providers=providers or ["CPUExecutionProvider"],
+                providers=providers,
             )
             self.app.prepare(
-                ctx_id=int(settings.insightface_ctx_id),
+                ctx_id=ctx_id,
                 det_thresh=float(settings.face_min_confidence),
-                det_size=(det_size, det_size),
+                det_size=(resolved_det_size, resolved_det_size),
             )
 
     @staticmethod
@@ -134,57 +143,26 @@ class InsightFaceProvider:
         )
 
     def _is_valid_bbox(self, bbox: list[int], score: float, frame_shape) -> bool:
-        if score < settings.face_min_confidence:
-            return False
-        frame_h, frame_w = frame_shape[:2]
-        width = max(0.0, float(bbox[2] - bbox[0]))
-        height = max(0.0, float(bbox[3] - bbox[1]))
-        if width <= 0 or height <= 0:
-            return False
-        area_ratio = (width * height) / max(1.0, float(frame_w * frame_h))
-        if area_ratio < settings.face_min_area_ratio or area_ratio > settings.face_max_area_ratio:
-            return False
-        aspect_ratio = width / max(1.0, height)
-        return 0.65 <= aspect_ratio <= 1.45
+        return is_valid_face_bbox(
+            bbox,
+            score,
+            frame_shape,
+            min_confidence=settings.face_min_confidence,
+            min_area_ratio=settings.face_min_area_ratio,
+            max_area_ratio=settings.face_max_area_ratio,
+        )
 
     def _is_valid_face(self, face, frame_shape, offset: tuple[int, int] = (0, 0)) -> bool:
         result = self._face_to_result(face, frame_shape, offset)
         return self._is_valid_bbox(result.bbox, result.confidence, frame_shape)
 
-    @staticmethod
-    def _bbox_iou(box_a: list[int], box_b: list[int]) -> float:
-        ax1, ay1, ax2, ay2 = box_a
-        bx1, by1, bx2, by2 = box_b
-        ix1, iy1 = max(ax1, bx1), max(ay1, by1)
-        ix2, iy2 = min(ax2, bx2), min(ay2, by2)
-        inter = max(0, ix2 - ix1) * max(0, iy2 - iy1)
-        if inter <= 0:
-            return 0.0
-        area_a = max(0, ax2 - ax1) * max(0, ay2 - ay1)
-        area_b = max(0, bx2 - bx1) * max(0, by2 - by1)
-        return inter / max(1, area_a + area_b - inter)
-
     def _dedupe_faces(self, faces: list[FaceResult]) -> list[FaceResult]:
-        ordered = sorted(
-            faces,
-            key=lambda item: (
-                item.confidence,
-                max(0, item.bbox[2] - item.bbox[0]) * max(0, item.bbox[3] - item.bbox[1]),
-            ),
-            reverse=True,
-        )
-        kept: list[FaceResult] = []
-        for face in ordered:
-            if all(self._bbox_iou(face.bbox, existing.bbox) < 0.35 for existing in kept):
-                kept.append(face)
-            if len(kept) >= settings.face_max_detections:
-                break
-        return kept
+        return dedupe_faces(faces, max_detections=settings.face_max_detections)
 
     def _tile_regions(self, frame: np.ndarray) -> list[tuple[int, int, np.ndarray]]:
         frame_h, frame_w = frame.shape[:2]
         if (
-            not settings.insightface_enable_tiled_detection
+            not self._enable_tiling
             or frame_w < settings.insightface_tile_min_width
             or frame_h < 480
         ):
@@ -217,6 +195,25 @@ class InsightFaceProvider:
                     result.metadata["source"] = "tile"
                     detected.append(result)
         return self._dedupe_faces(detected)
+
+    def detect_faces_in_region(
+        self,
+        region: np.ndarray,
+        full_frame_shape: tuple[int, int] | tuple[int, int, int],
+        offset: tuple[int, int] = (0, 0),
+    ) -> list[FaceResult]:
+        """Run face detection on a sub-image (e.g. a YOLO person crop).
+
+        Bounding boxes are translated by ``offset`` and validated against
+        ``full_frame_shape`` so area-ratio thresholds stay meaningful relative
+        to the whole scene rather than the crop.
+        """
+        detected: list[FaceResult] = []
+        for face in self.app.get(region):
+            result = self._face_to_result(face, full_frame_shape, offset)
+            if self._is_valid_bbox(result.bbox, result.confidence, full_frame_shape):
+                detected.append(result)
+        return detected
 
     def embed_image(self, path: str) -> EmbeddingResult:
         image = cv2.imread(path)

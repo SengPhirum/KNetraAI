@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from pathlib import Path
 import asyncio
 
@@ -95,6 +96,18 @@ async def get_worker(camera_id: str):
     if not worker:
         raise HTTPException(status_code=404, detail="Camera worker not found")
     return worker.info()
+
+
+@app.get("/cameras/{camera_id}/snapshot", dependencies=[Depends(verify_internal_key)])
+async def camera_snapshot(camera_id: str):
+    """Cheap thumbnail: re-serves the worker's already-encoded latest frame
+    (no new capture, just a dict lookup + base64) - only available while the
+    camera's live worker is running and has published at least one frame."""
+    worker = workers.get(camera_id)
+    if not worker or not worker.running or not worker.latest_jpeg:
+        raise HTTPException(status_code=404, detail="No live frame available - camera is not running yet")
+    thumbnail = "data:image/jpeg;base64," + base64.b64encode(worker.latest_jpeg).decode("ascii")
+    return {"ok": True, "thumbnail": thumbnail}
 
 
 @app.get("/cameras/{camera_id}/stream.mjpg", dependencies=[Depends(verify_internal_key)])

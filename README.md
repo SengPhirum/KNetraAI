@@ -2,9 +2,9 @@
 
 KNetraAI ("netra" = eye) is a CCTV-connected Vision AI system. The first module is **Walk-in Greeting AI**:
 
-- Connect RTSP/IP cameras (guided setup for Hikvision, EZVIZ, Dahua, Tapo, and more), or connect a camera/NVR over ONVIF and pick channels from a list instead of typing RTSP URLs.
+- Connect RTSP/IP cameras (guided setup for Hikvision, EZVIZ, Dahua, Tapo, and more), or connect a camera/NVR over ONVIF and pick channels from a list instead of typing RTSP URLs - each fetched channel shows a live thumbnail preview so you can tell channels apart before adding them.
 - Real-time CCTV-style live view (MJPEG) with a multi-camera grid, layout switcher, and fullscreen per-camera focus.
-- Detect faces from live video.
+- Detect faces from live video with a fast two-stage pipeline: a YOLO12 person detector narrows each frame down to person crops, then InsightFace (SCRFD + ArcFace) runs accurate face detection/embedding on just those crops - quicker and better at small/far faces than scanning the whole frame. Auto-detects GPU acceleration (CUDA/TensorRT/CoreML/DirectML) when available, CPU otherwise. See [Architecture](docs/architecture.md#face-detection-yolo-person-cascade).
 - Register staff and customers with face photos, CSV import, or HR/CRM API sync.
 - Generate 512-dimensional embeddings.
 - Search embeddings with PostgreSQL + pgvector.
@@ -73,7 +73,7 @@ docker compose up --build
 
 ```text
 Frontend: http://localhost:3010
-Backend API docs: http://localhost:8000/docs
+Backend API docs: http://localhost:8010/docs
 AI service docs: http://localhost:8001/docs
 ```
 
@@ -158,7 +158,6 @@ INTERNAL_API_KEY=change-this-in-production
 JWT_SECRET=change-this-in-production
 RECOGNITION_THRESHOLD=0.45
 GREETING_COOLDOWN_SECONDS=300
-NUXT_PUBLIC_API_BASE_URL=http://localhost:8000
 
 # Optional single sign-on and directory login (see Settings -> Authentication in the app)
 OIDC_ENABLED=false        # Keycloak, Authentik, or any OpenID Connect provider

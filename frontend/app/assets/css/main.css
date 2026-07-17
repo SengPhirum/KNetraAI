@@ -344,6 +344,16 @@ textarea {
   display: block;
 }
 
+.thumb-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  text-align: center;
+}
+
 .sr-only {
   position: absolute;
   width: 1px;
@@ -568,13 +578,51 @@ textarea {
   min-width: 0;
 }
 
-.camera-table .table th:first-child,
-.camera-table .table td:first-child {
+.camera-table .table .camera-name-col {
   min-width: 180px;
+}
+
+.checkbox-col {
+  width: 2.25rem;
 }
 
 .action-buttons {
   flex-wrap: nowrap;
+}
+
+.thumb-refresh {
+  display: block;
+  margin-top: 0.35rem;
+}
+
+.row-selected {
+  background: var(--primary-soft);
+}
+
+.bulk-action-bar {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 0.65rem 0.85rem;
+}
+
+.mobile-select {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.mobile-select input {
+  margin-top: 0.3rem;
+}
+
+.mobile-thumb-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
 }
 
 .help-details {

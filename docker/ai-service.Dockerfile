@@ -1,3 +1,22 @@
+# --- model-export stage --------------------------------------------------
+# Exports the official Ultralytics YOLO12n (COCO) checkpoint to ONNX for the
+# person-detection cascade. torch/ultralytics only ever live in this stage -
+# the runtime image below stays slim and depends on onnxruntime only.
+FROM python:3.11-slim AS model-export
+
+WORKDIR /export
+RUN pip install --no-cache-dir "ultralytics>=8.3,<9" \
+    # ultralytics pulls in the GUI opencv-python variant, which needs X11 libs
+    # (libxcb.so.1 etc.) this slim, headless builder doesn't have. Swap it for
+    # opencv-python-headless, same as the runtime image uses - no display needed
+    # to export a model.
+    && pip uninstall -y opencv-python \
+    && pip install --no-cache-dir opencv-python-headless
+RUN python -c "\
+from ultralytics import YOLO; \
+m = YOLO('yolo12n.pt'); \
+m.export(format='onnx', imgsz=640, opset=12, simplify=True)"
+
 FROM python:3.11-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -27,6 +46,7 @@ RUN pip install --upgrade pip \
     && pip install -r requirements.txt
 
 COPY --chown=app:app ai-service/app ./app
+COPY --from=model-export --chown=app:app /export/yolo12n.onnx ./models/yolo12n.onnx
 
 USER app
 EXPOSE 8001

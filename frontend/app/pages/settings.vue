@@ -94,14 +94,13 @@
           large models, but it is <strong>not reliable CCTV face detection</strong>. Use InsightFace for production.
         </p>
         <details>
-          <summary class="details-title">InsightFace production checklist</summary>
+          <summary class="details-title">Production checklist</summary>
           <ol class="details-list">
-            <li>In your <code>.env</code>, set <code>AI_PROVIDER=insightface</code> and <code>ALLOW_PROVIDER_FALLBACK=false</code>.</li>
-            <li>Keep <code>INSIGHTFACE_DET_SIZE=960</code> for better small-face detection on CCTV frames.</li>
-            <li>Keep <code>INSIGHTFACE_ENABLE_TILED_DETECTION=true</code> when entrances appear far from the camera.</li>
-            <li>Rebuild the AI service: <code>docker compose up -d --build ai-service</code>.</li>
-            <li>The first start downloads the model weights (several hundred MB); watch <code>docker logs knetraai-service</code>.</li>
-            <li>This card must show an <code>insightface_...</code> provider before live face detection is considered accurate.</li>
+            <li>In your <code>.env</code>, set <code>AI_PROVIDER=yolo_cascade</code> (recommended: fast YOLO12 person detection narrows the frame down before the accurate InsightFace stage runs) and <code>ALLOW_PROVIDER_FALLBACK=false</code>.</li>
+            <li>Rebuild the AI service so its Docker image includes the exported YOLO model: <code>docker compose up -d --build ai-service</code>.</li>
+            <li>The first start downloads the InsightFace model weights (several hundred MB); watch <code>docker logs knetraai-service</code>.</li>
+            <li>This card should show a <code>yolo_person_cascade+insightface_...</code> provider. If it instead shows <code>insightface_...</code>, the cascade fell back to plain InsightFace - check the ai-service logs for why the YOLO model wasn't found.</li>
+            <li>Have an NVIDIA GPU? Build with <code>docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build ai-service</code> to enable CUDA acceleration.</li>
           </ol>
         </details>
       </div>
@@ -202,7 +201,7 @@
           <input v-model="authForm.oidc.auto_create_users" type="checkbox" />
           Auto-create users on first SSO login
         </label>
-        <p class="section-text">Redirect URI to register at the provider: <code>{{ apiBaseUrl }}/auth/oidc/callback</code></p>
+        <p class="section-text">Redirect URI to register at the provider: <code>{{ authForm.oidc.redirect_uri }}</code></p>
         <button class="btn" :disabled="savingAuth" @click="saveAuth('oidc')">{{ savingAuth === 'oidc' ? 'Saving...' : 'Save OIDC Settings' }}</button>
 
         <details style="margin-top: 1rem;">
@@ -210,7 +209,7 @@
           <ol class="details-list">
             <li>Admin console → your realm → <strong>Clients → Create client</strong> (OpenID Connect, ID <code>knetraai</code>).</li>
             <li>Enable <strong>Client authentication</strong> and keep <strong>Standard flow</strong> checked.</li>
-            <li>Valid redirect URIs: <code>{{ apiBaseUrl }}/auth/oidc/callback</code>; Web origins: your frontend URL.</li>
+            <li>Valid redirect URIs: <code>{{ authForm.oidc.redirect_uri }}</code>; Web origins: your frontend URL.</li>
             <li>Copy the secret from the <strong>Credentials</strong> tab into the form above.</li>
             <li>Issuer URL: <code>https://&lt;keycloak-host&gt;/realms/&lt;realm&gt;</code>. Ensure users have an email set.</li>
           </ol>
@@ -218,7 +217,7 @@
         <details>
           <summary class="details-title">Authentik - step by step</summary>
           <ol class="details-list">
-            <li><strong>Applications → Providers → Create → OAuth2/OpenID Provider</strong> (Confidential) with redirect URI <code>{{ apiBaseUrl }}/auth/oidc/callback</code>.</li>
+            <li><strong>Applications → Providers → Create → OAuth2/OpenID Provider</strong> (Confidential) with redirect URI <code>{{ authForm.oidc.redirect_uri }}</code>.</li>
             <li>Create an <strong>Application</strong> with slug <code>knetraai</code> linked to the provider.</li>
             <li>Issuer URL: <code>https://&lt;authentik-host&gt;/application/o/knetraai/</code>.</li>
             <li>Copy the Client ID and Client Secret into the form above.</li>
@@ -314,7 +313,7 @@ const scheduleMessage = ref('')
 
 const authForm = reactive<any>({
   local: { enabled: true, password_min_length: 8, password_require_uppercase: false, password_require_lowercase: false, password_require_digit: false, password_require_special: false },
-  oidc: { enabled: false, issuer: '', client_id: '', client_secret: '', client_secret_set: false, scopes: 'openid profile email', provider_name: 'SSO', default_role: 'Viewer', auto_create_users: true },
+  oidc: { enabled: false, issuer: '', client_id: '', client_secret: '', client_secret_set: false, scopes: 'openid profile email', provider_name: 'SSO', default_role: 'Viewer', auto_create_users: true, redirect_uri: '' },
   ldap: { enabled: false, server_url: '', user_dn_template: '', bind_dn: '', bind_password: '', bind_password_set: false, search_base: '', user_filter: '(|(uid={username})(sAMAccountName={username})(mail={username}))', email_attribute: 'mail', name_attribute: 'cn', default_role: 'Viewer' }
 })
 const savingAuth = ref('')

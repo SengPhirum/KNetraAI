@@ -66,8 +66,12 @@ services:
     container_name: knetraai-frontend
     restart: unless-stopped
     environment:
-      NUXT_PUBLIC_API_BASE_URL: ${NUXT_PUBLIC_API_BASE_URL:-}
-      NUXT_PUBLIC_API_PORT: ${BACKEND_HOST_PORT:-8010}
+      # Server-only: frontend's Nitro server proxies /api/** here so the browser
+      # never talks to the backend directly. Same value ai-service uses to reach
+      # the backend, since both are internal, container-to-container addresses.
+      # NUXT_ prefix is Nuxt's own convention for overriding runtimeConfig at
+      # server start (see nuxt.config.ts's runtimeConfig.backendUrl).
+      NUXT_BACKEND_URL: ${BACKEND_URL:-http://backend:8000}
     ports:
       - "3010:3010"
     depends_on:

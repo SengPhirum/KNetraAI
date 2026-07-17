@@ -18,12 +18,13 @@ export default defineNuxtConfig({
     }
   },
   runtimeConfig: {
-    public: {
-      // Leave apiBaseUrl unset to auto-detect from the browser's current host
-      // (works for localhost, LAN IP, or any hostname). Set NUXT_PUBLIC_API_BASE_URL
-      // to force a specific backend URL instead (e.g. behind a reverse proxy).
-      apiBaseUrl: process.env.NUXT_PUBLIC_API_BASE_URL || '',
-      apiPort: process.env.NUXT_PUBLIC_API_PORT || '8000'
-    }
+    // Server-only: the browser never sees this. server/api/[...path].ts proxies
+    // every /api/** request here, so the backend's real address/port never has to
+    // be reachable from - or known to - the browser.
+    // This default is only a fallback for `nuxt dev` - nuxt.config.ts is evaluated
+    // at build time, so it can't read a docker-compose env var that's only set at
+    // container start. Nuxt overrides runtimeConfig keys from matching NUXT_<KEY>
+    // env vars at server start instead (see docker-compose.yml's NUXT_BACKEND_URL).
+    backendUrl: 'http://localhost:8000'
   }
 })

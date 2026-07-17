@@ -30,6 +30,10 @@ def _defaults() -> dict[str, dict[str, Any]]:
             "provider_name": settings.oidc_provider_name,
             "default_role": settings.oidc_default_role,
             "auto_create_users": settings.oidc_auto_create_users,
+            # The actual callback URL the backend registers with the IdP (see
+            # routers/auth.py::_oidc_redirect_uri) - exposed so the frontend can show
+            # admins the real value instead of guessing it from its own origin.
+            "redirect_uri": settings.api_base_url.rstrip("/") + "/auth/oidc/callback",
         },
         "ldap": {
             "enabled": settings.ldap_enabled,

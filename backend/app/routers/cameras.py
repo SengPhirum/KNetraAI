@@ -297,6 +297,53 @@ async def stream_camera(camera_id: str, user=Depends(get_sse_user)):
     return StreamingResponse(relay(), media_type=response.headers.get("content-type", "multipart/x-mixed-replace; boundary=frame"))
 
 
+@router.get("/{camera_id}/snapshot")
+async def camera_snapshot(
+    camera_id: str,
+    probe: bool = False,
+    user=Depends(require_roles("Admin", "Manager", "Operator", "Viewer")),
+):
+    """Thumbnail for the camera list. Cheap path first: re-serves the live worker's
+    already-encoded latest frame if the camera is running. ``probe=true`` (the
+    "force refresh" button) additionally falls back to a fresh one-shot RTSP grab
+    when the cheap path isn't available - e.g. the camera is currently stopped -
+    which is deliberately opt-in so loading/refreshing the whole camera list never
+    fans out a live RTSP connection per stopped camera on its own."""
+    camera = await fetchrow("SELECT * FROM cameras WHERE id = $1::uuid", camera_id)
+    if camera is None:
+        raise HTTPException(status_code=404, detail="Camera not found")
+
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            response = await client.get(
+                f"{settings.ai_service_url}/cameras/{camera_id}/snapshot",
+                headers={"x-internal-api-key": settings.internal_api_key},
+            )
+        if response.status_code == 200:
+            return {**response.json(), "source": "live"}
+    except httpx.HTTPError:
+        pass
+
+    if not probe:
+        return {"ok": False, "error": "Camera is not running", "source": "live"}
+
+    timeout = httpx.Timeout(15.0, connect=5.0, read=15.0, write=5.0, pool=15.0)
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            response = await client.post(
+                f"{settings.ai_service_url}/discovery/test-stream",
+                json={"rtsp_url": camera["rtsp_url"], "timeout_ms": 7000},
+                headers={"x-internal-api-key": settings.internal_api_key},
+            )
+        if response.status_code >= 400:
+            _raise_for_status(response)
+        return {**response.json(), "source": "probe"}
+    except httpx.TimeoutException:
+        return {"ok": False, "error": "Snapshot timed out. The camera may be offline or unreachable.", "source": "probe"}
+    except httpx.HTTPError as exc:
+        return {"ok": False, "error": f"Could not reach the AI service: {exc}", "source": "probe"}
+
+
 @router.post("/discover")
 async def discover_cameras(payload: CameraDiscoverRequest, user=Depends(require_roles("Admin", "Manager"))):
     try:

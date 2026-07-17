@@ -17,3 +17,7 @@ insightface>=0.7.3
 # scikit-image 0.26 emits a noisy FutureWarning for that API.
 scikit-image>=0.25,<0.26
 onnxruntime>=1.18
+# YOLO12 person-detection cascade (ai_provider=yolo_cascade) runs on ONNX Runtime only -
+# no torch/ultralytics at runtime. Those live solely in the Dockerfile's "model-export"
+# build stage (and scripts/export_yolo_person_model.py for local/dev use), keeping this
+# image slim. See ai-service/scripts/export_yolo_person_model.py for details.

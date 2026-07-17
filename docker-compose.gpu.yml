@@ -1,0 +1,21 @@
+# Optional GPU overlay for ai-service. Requires an NVIDIA driver and the NVIDIA
+# Container Toolkit (nvidia-ctk) installed on the Docker host. Usage:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
+#
+# app/vision/hw.py already auto-detects CUDAExecutionProvider at runtime once
+# it's actually available - this overlay is what makes it available: it swaps
+# in onnxruntime-gpu and gives the container access to the GPU device.
+services:
+  ai-service:
+    build:
+      context: ./ai-service
+      args:
+        ONNXRUNTIME_VARIANT: gpu
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

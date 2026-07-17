@@ -58,6 +58,15 @@
         <label class="label" for="onvif-password">Password</label>
         <input id="onvif-password" v-model="connectForm.password" type="password" class="input" autocomplete="current-password" />
       </div>
+      <div>
+        <label class="label" for="onvif-stream-type">Stream type to fetch</label>
+        <select id="onvif-stream-type" v-model="connectForm.streamType">
+          <option value="main">Main Stream</option>
+          <option value="sub">Sub Stream</option>
+          <option value="all">All</option>
+        </select>
+        <small class="hint">Skips testing the streams you don't want - change this after fetching too.</small>
+      </div>
       <div class="form-actions">
         <button class="btn" type="submit" :disabled="probing || validating">
           {{ probing ? 'Fetching...' : validating ? 'Checking Streams...' : 'Fetch Channels' }}
@@ -72,8 +81,11 @@
           <p class="section-kicker">Fetched device</p>
           <h3>{{ deviceTitle }}</h3>
           <p>
-            {{ workingChannelRows.length }} working of {{ channelRows.length }} fetched channels
+            {{ workingChannelRows.length }} working of {{ typedChannelRows.length }} {{ streamTypeLabel }} channels
             <span v-if="hiddenChannelCount">, {{ hiddenChannelCount }} hidden</span>
+            <span v-if="otherTypeChannelCount">
+              ({{ otherTypeChannelCount }} more fetched but not shown - switch Stream type to All to see them)
+            </span>
           </p>
         </div>
         <div class="btn-row channel-tools">
@@ -107,6 +119,7 @@
           <thead>
             <tr>
               <th scope="col">Add</th>
+              <th scope="col">Preview</th>
               <th scope="col">Configured Name</th>
               <th scope="col">Stream</th>
               <th scope="col">Profile</th>
@@ -124,6 +137,10 @@
                   :aria-label="`Select ${row.name}`"
                   :disabled="!isWorking(row)"
                 />
+              </td>
+              <td>
+                <img v-if="row.testResult?.thumbnail" class="thumb" :src="row.testResult.thumbnail" :alt="`Preview of ${row.name}`" />
+                <div v-else class="thumb thumb-placeholder">{{ row.testing ? '...' : '-' }}</div>
               </td>
               <th scope="row">
                 <input v-model="row.name" class="input dense-input" :disabled="!isWorking(row)" />
@@ -162,6 +179,8 @@
             </label>
             <span class="badge dot" :class="channelStatusClass(row)">{{ channelStatusText(row) }}</span>
           </div>
+          <img v-if="row.testResult?.thumbnail" class="thumb" :src="row.testResult.thumbnail" :alt="`Preview of ${row.name}`" />
+          <div v-else class="thumb thumb-placeholder">{{ row.testing ? 'Testing...' : 'No preview' }}</div>
           <input v-model="row.name" class="input" :disabled="!isWorking(row)" />
           <dl class="detail-grid">
             <div><dt>Configured</dt><dd>{{ row.source_name || row.configured_name || '-' }}</dd></div>
@@ -197,7 +216,7 @@ type DiscoveryDevice = {
   types?: string[]
 }
 
-type StreamTestResult = { ok: boolean; width?: number; height?: number; error?: string }
+type StreamTestResult = { ok: boolean; width?: number; height?: number; error?: string; thumbnail?: string }
 
 type ChannelRow = {
   selected: boolean
@@ -225,7 +244,7 @@ const scanning = ref(false)
 const scanResults = ref<DiscoveryDevice[]>([])
 const scanNotice = ref('')
 
-const connectForm = reactive({ host: '', port: 80, username: '', password: '' })
+const connectForm = reactive({ host: '', port: 80, username: '', password: '', streamType: 'main' as 'all' | 'main' | 'sub' })
 const probing = ref(false)
 const validating = ref(false)
 const probeError = ref('')
@@ -244,9 +263,29 @@ const deviceTitle = computed(() => {
 })
 
 const isWorking = (row: ChannelRow) => Boolean(row.rtsp_url && !row.error && row.testResult?.ok)
-const workingChannelRows = computed(() => channelRows.value.filter(isWorking))
-const visibleChannelRows = computed(() => showUnavailable.value ? channelRows.value : workingChannelRows.value)
-const hiddenChannelCount = computed(() => Math.max(0, channelRows.value.length - workingChannelRows.value.length))
+
+// "Main"/"Sub" come from the ONVIF profile/encoder name or resolution heuristic in
+// onvif_discovery.py - when a device doesn't give enough info to tell, it comes back
+// as a bare "Stream" label. Those ambiguous ones are kept visible under both Main and
+// Sub filters (only "All" vs a confident opposite label ever hides a channel), so an
+// unclassifiable channel is never silently dropped just because we couldn't label it.
+const matchesStreamType = (row: ChannelRow) => {
+  if (connectForm.streamType === 'all') return true
+  const label = (row.stream_label || '').toLowerCase()
+  return connectForm.streamType === 'main' ? label !== 'sub stream' : label !== 'main stream'
+}
+
+const streamTypeLabel = computed(() => {
+  if (connectForm.streamType === 'main') return 'main stream'
+  if (connectForm.streamType === 'sub') return 'sub stream'
+  return 'fetched'
+})
+
+const typedChannelRows = computed(() => channelRows.value.filter(matchesStreamType))
+const otherTypeChannelCount = computed(() => Math.max(0, channelRows.value.length - typedChannelRows.value.length))
+const workingChannelRows = computed(() => typedChannelRows.value.filter(isWorking))
+const visibleChannelRows = computed(() => showUnavailable.value ? typedChannelRows.value : workingChannelRows.value)
+const hiddenChannelCount = computed(() => Math.max(0, typedChannelRows.value.length - workingChannelRows.value.length))
 const selectedWorkingCount = computed(() => channelRows.value.filter(row => row.selected && isWorking(row)).length)
 const canAddSelected = computed(() => !adding.value && !validating.value && selectedWorkingCount.value > 0)
 
@@ -326,7 +365,11 @@ const fetchChannels = async () => {
 }
 
 const validateFetchedChannels = async () => {
-  const rows = channelRows.value.filter(row => row.rtsp_url && !row.error)
+  // Only test channels matching the current stream-type filter, and only ones not
+  // already tested - this both avoids wasting RTSP test connections on streams the
+  // user doesn't want, and lets switching the filter later (e.g. Main -> All) test
+  // just the newly-revealed rows instead of re-testing everything from scratch.
+  const rows = typedChannelRows.value.filter(row => row.rtsp_url && !row.error && row.testResult === null && !row.testing)
   if (!rows.length) return
   validating.value = true
   try {
@@ -337,14 +380,18 @@ const validateFetchedChannels = async () => {
         const row = rows[next]
         next += 1
         await testChannel(row, true)
+        row.selected = isWorking(row)
       }
     })
     await Promise.all(workers)
-    channelRows.value.forEach(row => { row.selected = isWorking(row) })
   } finally {
     validating.value = false
   }
 }
+
+watch(() => connectForm.streamType, () => {
+  validateFetchedChannels()
+})
 
 const testChannel = async (row: ChannelRow, fromBatch = false) => {
   if (!row.rtsp_url) return
@@ -365,7 +412,7 @@ const testChannel = async (row: ChannelRow, fromBatch = false) => {
 }
 
 const selectAllWorking = () => {
-  channelRows.value.forEach(row => { row.selected = isWorking(row) })
+  typedChannelRows.value.forEach(row => { row.selected = isWorking(row) })
 }
 
 const clearSelection = () => {

@@ -145,12 +145,40 @@
         </div>
       </div>
 
+      <div v-if="selectedIds.size" class="action-bar bulk-action-bar">
+        <div class="muted-cell">{{ selectedIds.size }} camera{{ selectedIds.size === 1 ? '' : 's' }} selected</div>
+        <div class="btn-row">
+          <button class="btn sm" type="button" :disabled="bulkRunning || !selectedStartableCount" @click="bulkStart">
+            {{ bulkRunning && bulkActionLabel === 'start' ? 'Starting...' : `Start Selected (${selectedStartableCount})` }}
+          </button>
+          <button class="btn sm secondary" type="button" :disabled="bulkRunning || !selectedStoppableCount" @click="bulkStop">
+            {{ bulkRunning && bulkActionLabel === 'stop' ? 'Stopping...' : `Stop Selected (${selectedStoppableCount})` }}
+          </button>
+          <button class="btn sm danger" type="button" :disabled="bulkRunning" @click="bulkDelete">
+            {{ bulkRunning && bulkActionLabel === 'delete' ? 'Deleting...' : `Delete Selected (${selectedIds.size})` }}
+          </button>
+          <button class="btn sm secondary" type="button" :disabled="bulkRunning" @click="clearSelection">Clear</button>
+        </div>
+      </div>
+      <p v-if="bulkMessage" class="notice">{{ bulkMessage }}</p>
+
       <div class="table-wrap camera-table responsive-table">
         <table class="table">
           <caption class="sr-only">Configured cameras</caption>
           <thead>
             <tr>
-              <th scope="col">Camera</th>
+              <th scope="col" class="checkbox-col">
+                <input
+                  ref="selectAllRef"
+                  type="checkbox"
+                  :checked="allVisibleSelected"
+                  :disabled="bulkRunning || !visibleCameras.length"
+                  aria-label="Select all visible cameras"
+                  @change="toggleSelectAll"
+                />
+              </th>
+              <th scope="col">Preview</th>
+              <th scope="col" class="camera-name-col">Camera</th>
               <th scope="col">Site</th>
               <th scope="col">Source</th>
               <th scope="col">Active</th>
@@ -161,10 +189,33 @@
           </thead>
           <tbody>
             <tr v-if="!visibleCameras.length">
-              <td colspan="7" class="empty-row">{{ emptyMessage }}</td>
+              <td colspan="9" class="empty-row">{{ emptyMessage }}</td>
             </tr>
-            <tr v-for="camera in visibleCameras" :key="camera.id">
-              <th scope="row">
+            <tr v-for="camera in visibleCameras" :key="camera.id" :class="{ 'row-selected': selectedIds.has(camera.id) }">
+              <td>
+                <input
+                  type="checkbox"
+                  :checked="selectedIds.has(camera.id)"
+                  :disabled="bulkRunning"
+                  :aria-label="`Select ${camera.name}`"
+                  @change="toggleSelect(camera.id)"
+                />
+              </td>
+              <td>
+                <img v-if="thumbnails[camera.id]?.url" class="thumb" :src="thumbnails[camera.id].url" :alt="`Preview of ${camera.name}`" />
+                <div v-else class="thumb thumb-placeholder" :title="thumbnails[camera.id]?.error || ''">
+                  {{ thumbnails[camera.id]?.loading ? '...' : 'No preview' }}
+                </div>
+                <button
+                  class="btn sm secondary thumb-refresh"
+                  type="button"
+                  :disabled="thumbnails[camera.id]?.loading"
+                  @click="loadThumbnail(camera, { probe: true })"
+                >
+                  {{ thumbnails[camera.id]?.loading ? 'Refreshing...' : 'Refresh' }}
+                </button>
+              </td>
+              <th scope="row" class="camera-name-col">
                 <div class="primary-cell">{{ camera.name }}</div>
                 <div v-if="camera.last_error" class="muted-cell danger-text">{{ camera.last_error }}</div>
               </th>
@@ -180,13 +231,13 @@
                 <div class="btn-row action-buttons">
                   <button class="btn sm secondary" type="button" @click="edit(camera)">Edit</button>
                   <button class="btn sm" type="button" :disabled="!canStartLive(camera)" @click="start(camera)">
-                    {{ busyCameraId === camera.id && busyAction === 'start' ? 'Starting...' : 'Start Live' }}
+                    {{ busyActions.get(camera.id) === 'start' ? 'Starting...' : 'Start Live' }}
                   </button>
                   <button class="btn sm secondary" type="button" :disabled="!canStopLive(camera)" @click="stop(camera)">
-                    {{ busyCameraId === camera.id && busyAction === 'stop' ? 'Stopping...' : 'Stop Live' }}
+                    {{ busyActions.get(camera.id) === 'stop' ? 'Stopping...' : 'Stop Live' }}
                   </button>
-                  <button class="btn sm danger" type="button" :disabled="busyCameraId === camera.id" @click="remove(camera)">
-                    {{ busyCameraId === camera.id && busyAction === 'delete' ? 'Deleting...' : 'Delete' }}
+                  <button class="btn sm danger" type="button" :disabled="isBusy(camera)" @click="remove(camera)">
+                    {{ busyActions.get(camera.id) === 'delete' ? 'Deleting...' : 'Delete' }}
                   </button>
                 </div>
               </td>
@@ -197,13 +248,36 @@
 
       <div class="camera-card-list">
         <p v-if="!visibleCameras.length" class="empty-row">{{ emptyMessage }}</p>
-        <article v-for="camera in visibleCameras" :key="camera.id" class="camera-mobile-card">
+        <article v-for="camera in visibleCameras" :key="camera.id" class="camera-mobile-card" :class="{ 'row-selected': selectedIds.has(camera.id) }">
           <div class="mobile-card-head">
-            <div>
-              <h3>{{ camera.name }}</h3>
-              <p>{{ [camera.branch, camera.location].filter(Boolean).join(' - ') || 'No site set' }}</p>
-            </div>
+            <label class="checkbox-label mobile-select">
+              <input
+                type="checkbox"
+                :checked="selectedIds.has(camera.id)"
+                :disabled="bulkRunning"
+                :aria-label="`Select ${camera.name}`"
+                @change="toggleSelect(camera.id)"
+              />
+              <div>
+                <h3>{{ camera.name }}</h3>
+                <p>{{ [camera.branch, camera.location].filter(Boolean).join(' - ') || 'No site set' }}</p>
+              </div>
+            </label>
             <span class="badge dot" :class="statusClass(camera.status)">{{ statusLabel(camera.status) }}</span>
+          </div>
+          <div class="mobile-thumb-row">
+            <img v-if="thumbnails[camera.id]?.url" class="thumb" :src="thumbnails[camera.id].url" :alt="`Preview of ${camera.name}`" />
+            <div v-else class="thumb thumb-placeholder" :title="thumbnails[camera.id]?.error || ''">
+              {{ thumbnails[camera.id]?.loading ? '...' : 'No preview' }}
+            </div>
+            <button
+              class="btn sm secondary"
+              type="button"
+              :disabled="thumbnails[camera.id]?.loading"
+              @click="loadThumbnail(camera, { probe: true })"
+            >
+              {{ thumbnails[camera.id]?.loading ? 'Refreshing...' : 'Refresh' }}
+            </button>
           </div>
           <dl class="detail-grid">
             <div><dt>Source</dt><dd>{{ camera.source === 'onvif' ? 'ONVIF' : 'Manual' }}</dd></div>
@@ -213,9 +287,15 @@
           </dl>
           <div class="btn-row action-buttons">
             <button class="btn sm secondary" type="button" @click="edit(camera)">Edit</button>
-            <button class="btn sm" type="button" :disabled="!canStartLive(camera)" @click="start(camera)">Start Live</button>
-            <button class="btn sm secondary" type="button" :disabled="!canStopLive(camera)" @click="stop(camera)">Stop Live</button>
-            <button class="btn sm danger" type="button" :disabled="busyCameraId === camera.id" @click="remove(camera)">Delete</button>
+            <button class="btn sm" type="button" :disabled="!canStartLive(camera)" @click="start(camera)">
+              {{ busyActions.get(camera.id) === 'start' ? 'Starting...' : 'Start Live' }}
+            </button>
+            <button class="btn sm secondary" type="button" :disabled="!canStopLive(camera)" @click="stop(camera)">
+              {{ busyActions.get(camera.id) === 'stop' ? 'Stopping...' : 'Stop Live' }}
+            </button>
+            <button class="btn sm danger" type="button" :disabled="isBusy(camera)" @click="remove(camera)">
+              {{ busyActions.get(camera.id) === 'delete' ? 'Deleting...' : 'Delete' }}
+            </button>
           </div>
         </article>
       </div>
@@ -238,6 +318,15 @@ type Camera = {
   last_error?: string | null
 }
 
+type ThumbnailState = {
+  url?: string
+  loading: boolean
+  error?: string
+}
+
+type BulkAction = 'start' | 'stop' | 'delete'
+type SnapshotResponse = { ok: boolean; thumbnail?: string; error?: string; source?: string }
+
 const { apiFetch } = useApi()
 const cameras = ref<Camera[]>([])
 const error = ref('')
@@ -249,8 +338,14 @@ const form = reactive({ name: '', branch: '', location: '', rtsp_url: '', enable
 const editingId = ref<string | null>(null)
 const testing = ref(false)
 const testResult = ref<{ ok: boolean; width?: number; height?: number; error?: string } | null>(null)
-const busyCameraId = ref<string | null>(null)
-const busyAction = ref<'start' | 'stop' | 'delete' | null>(null)
+
+const busyActions = reactive(new Map<string, BulkAction>())
+const thumbnails = reactive<Record<string, ThumbnailState>>({})
+const selectedIds = reactive(new Set<string>())
+const selectAllRef = ref<HTMLInputElement | null>(null)
+const bulkRunning = ref(false)
+const bulkActionLabel = ref<BulkAction | null>(null)
+const bulkMessage = ref('')
 
 const rtspTemplates = [
   { brand: 'Hikvision / HiLook / Annke', url: 'rtsp://user:pass@CAMERA_IP:554/Streaming/Channels/101' },
@@ -280,6 +375,37 @@ const emptyMessage = computed(() => {
   if (!cameras.value.length) return 'No cameras yet. Add your first camera above.'
   return 'No active cameras match this view. Switch to All to see disabled cameras.'
 })
+
+const allVisibleSelected = computed(() =>
+  visibleCameras.value.length > 0 && visibleCameras.value.every(camera => selectedIds.has(camera.id))
+)
+const someVisibleSelected = computed(() =>
+  visibleCameras.value.some(camera => selectedIds.has(camera.id))
+)
+const selectedCameras = computed(() => cameras.value.filter(camera => selectedIds.has(camera.id)))
+const selectedStartableCount = computed(() => selectedCameras.value.filter(canStartLive).length)
+const selectedStoppableCount = computed(() => selectedCameras.value.filter(canStopLive).length)
+
+watchEffect(() => {
+  if (selectAllRef.value) {
+    selectAllRef.value.indeterminate = someVisibleSelected.value && !allVisibleSelected.value
+  }
+})
+
+const toggleSelectAll = () => {
+  if (allVisibleSelected.value) {
+    visibleCameras.value.forEach(camera => selectedIds.delete(camera.id))
+  } else {
+    visibleCameras.value.forEach(camera => selectedIds.add(camera.id))
+  }
+}
+
+const toggleSelect = (id: string) => {
+  if (selectedIds.has(id)) selectedIds.delete(id)
+  else selectedIds.add(id)
+}
+
+const clearSelection = () => selectedIds.clear()
 
 const useTemplate = (url: string) => {
   form.rtsp_url = url
@@ -323,9 +449,32 @@ const maskRtsp = (url: string) => {
   return url.replace(/(rtsp:\/\/[^:/@]+:)([^@]+)(@)/i, '$1***$3')
 }
 
-const isBusy = (camera: Camera) => busyCameraId.value === camera.id
-const canStartLive = (camera: Camera) => camera.enabled && !runningStatuses.has(camera.status) && !isBusy(camera)
-const canStopLive = (camera: Camera) => runningStatuses.has(camera.status) && !isBusy(camera)
+const isBusy = (camera: Camera) => busyActions.has(camera.id)
+function canStartLive(camera: Camera) {
+  return camera.enabled && !runningStatuses.has(camera.status) && !isBusy(camera)
+}
+function canStopLive(camera: Camera) {
+  return runningStatuses.has(camera.status) && !isBusy(camera)
+}
+
+const loadThumbnail = async (camera: Camera, options: { probe?: boolean } = {}) => {
+  const state = thumbnails[camera.id] || (thumbnails[camera.id] = { loading: false })
+  state.loading = true
+  state.error = undefined
+  try {
+    const path = `/cameras/${camera.id}/snapshot${options.probe ? '?probe=true' : ''}`
+    const result = await apiFetch<SnapshotResponse>(path)
+    if (result.ok && result.thumbnail) {
+      state.url = result.thumbnail
+    } else if (!result.ok) {
+      state.error = result.error || 'No preview available'
+    }
+  } catch (e: any) {
+    state.error = e?.data?.detail || e.message || 'Could not load preview.'
+  } finally {
+    state.loading = false
+  }
+}
 
 const testConnection = async () => {
   if (!form.rtsp_url) {
@@ -349,6 +498,22 @@ const load = async () => {
   error.value = ''
   try {
     cameras.value = await apiFetch<Camera[]>('/cameras')
+    const validIds = new Set(cameras.value.map(camera => camera.id))
+    for (const id of Array.from(selectedIds)) {
+      if (!validIds.has(id)) selectedIds.delete(id)
+    }
+    for (const id of Object.keys(thumbnails)) {
+      if (!validIds.has(id)) delete thumbnails[id]
+    }
+    for (const camera of cameras.value) {
+      if (!thumbnails[camera.id]) thumbnails[camera.id] = { loading: false }
+      // Only auto-refresh cameras already known to be live - fetching a thumbnail for a
+      // stopped camera means a real RTSP probe (see loadThumbnail/backend snapshot route),
+      // and firing that for every stopped channel on every list load/refresh would hammer
+      // the NVR with dozens of simultaneous connections. Stopped cameras get a manual
+      // "Refresh" button instead.
+      if (camera.status === 'running') loadThumbnail(camera)
+    }
   } catch (e: any) {
     error.value = e?.data?.detail || e.message || 'Could not load cameras.'
   } finally {
@@ -381,19 +546,20 @@ const saveCamera = async () => {
   }
 }
 
-const runCameraAction = async (camera: Camera, action: 'start' | 'stop' | 'delete', task: () => Promise<void>) => {
-  error.value = ''
-  busyCameraId.value = camera.id
-  busyAction.value = action
+const performCameraAction = async (
+  camera: Camera,
+  action: BulkAction,
+  task: () => Promise<void>
+): Promise<{ ok: true } | { ok: false; error: string }> => {
+  busyActions.set(camera.id, action)
   try {
     await task()
-    await load()
+    return { ok: true }
   } catch (e: any) {
     const actionLabel = action === 'start' ? 'start live view' : action === 'stop' ? 'stop live view' : 'delete camera'
-    error.value = e?.data?.detail || e.message || `Could not ${actionLabel}.`
+    return { ok: false, error: e?.data?.detail || e.message || `Could not ${actionLabel}.` }
   } finally {
-    busyCameraId.value = null
-    busyAction.value = null
+    busyActions.delete(camera.id)
   }
 }
 
@@ -402,20 +568,96 @@ const start = async (camera: Camera) => {
     error.value = 'Enable this camera before starting live view.'
     return
   }
-  await runCameraAction(camera, 'start', async () => {
+  error.value = ''
+  const result = await performCameraAction(camera, 'start', async () => {
     await apiFetch(`/cameras/${camera.id}/start`, { method: 'POST' })
   })
+  if (!result.ok) error.value = result.error
+  await load()
 }
 
 const stop = async (camera: Camera) => {
-  await runCameraAction(camera, 'stop', async () => {
+  error.value = ''
+  const result = await performCameraAction(camera, 'stop', async () => {
     await apiFetch(`/cameras/${camera.id}/stop`, { method: 'POST' })
   })
+  if (!result.ok) error.value = result.error
+  await load()
 }
 
 const remove = async (camera: Camera) => {
   if (!confirm(`Delete camera "${camera.name}"?`)) return
-  await runCameraAction(camera, 'delete', async () => {
+  error.value = ''
+  const result = await performCameraAction(camera, 'delete', async () => {
+    await apiFetch(`/cameras/${camera.id}`, { method: 'DELETE' })
+    if (editingId.value === camera.id) resetForm()
+  })
+  if (!result.ok) error.value = result.error
+  await load()
+}
+
+const runBulk = async (
+  label: string,
+  actionKey: BulkAction,
+  targets: Camera[],
+  task: (camera: Camera) => Promise<void>
+) => {
+  if (!targets.length) return
+  bulkRunning.value = true
+  bulkActionLabel.value = actionKey
+  bulkMessage.value = ''
+  error.value = ''
+  const results: { camera: Camera; ok: boolean; error?: string }[] = []
+  try {
+    let next = 0
+    const workerCount = Math.min(3, targets.length)
+    const workers = Array.from({ length: workerCount }, async () => {
+      while (next < targets.length) {
+        const camera = targets[next]
+        next += 1
+        const result = await performCameraAction(camera, actionKey, () => task(camera))
+        results.push({ camera, ok: result.ok, error: !result.ok ? result.error : undefined })
+      }
+    })
+    await Promise.all(workers)
+  } finally {
+    bulkRunning.value = false
+    bulkActionLabel.value = null
+  }
+  await load()
+  const failed = results.filter(r => !r.ok)
+  bulkMessage.value = failed.length
+    ? `${label}: ${results.length - failed.length} of ${results.length} succeeded. Failed: ${failed.map(f => `${f.camera.name} (${f.error})`).join('; ')}`
+    : `${label}: ${results.length} of ${results.length} succeeded.`
+}
+
+const bulkStart = () => {
+  const targets = selectedCameras.value.filter(canStartLive)
+  if (!targets.length) {
+    error.value = 'None of the selected cameras can be started (already live, disabled, or busy).'
+    return
+  }
+  return runBulk('Start selected', 'start', targets, async (camera) => {
+    await apiFetch(`/cameras/${camera.id}/start`, { method: 'POST' })
+  })
+}
+
+const bulkStop = () => {
+  const targets = selectedCameras.value.filter(canStopLive)
+  if (!targets.length) {
+    error.value = 'None of the selected cameras are currently live.'
+    return
+  }
+  return runBulk('Stop selected', 'stop', targets, async (camera) => {
+    await apiFetch(`/cameras/${camera.id}/stop`, { method: 'POST' })
+  })
+}
+
+const bulkDelete = () => {
+  const targets = selectedCameras.value.filter(camera => !isBusy(camera))
+  if (!targets.length) return
+  if (!confirm(`Delete ${targets.length} selected camera${targets.length === 1 ? '' : 's'}? This cannot be undone.`)) return
+  return runBulk('Delete selected', 'delete', targets, async (camera) => {
     await apiFetch(`/cameras/${camera.id}`, { method: 'DELETE' })
     if (editingId.value === camera.id) resetForm()
   })
