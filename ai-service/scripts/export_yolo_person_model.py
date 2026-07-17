@@ -11,6 +11,15 @@ the ONNX file with a different input size / model variant:
     pip install "ultralytics>=8.3,<9"
     python scripts/export_yolo_person_model.py [--model yolo12n.pt] [--imgsz 640] [--out ../models/yolo12n.onnx]
 
+Pass --quantize to additionally produce a dynamically-quantized (INT8 weights) copy
+next to the fp32 one - this is what the Docker build's model-export stage does
+automatically, and what YOLO_PERSON_MODEL_PATH should point at for a Raspberry Pi /
+low-power deployment (device_profile=low picks it automatically if it's present at
+the default path):
+
+    python scripts/export_yolo_person_model.py --quantize
+    pip install onnx onnxruntime sympy  # only needed for --quantize
+
 Only Ultralytics' own official, GitHub-released COCO checkpoints are used
 (downloaded by the `ultralytics` package itself) - class 0 of that checkpoint
 is "person", which is all the cascade provider uses. Any Ultralytics YOLO
@@ -36,17 +45,38 @@ def main() -> None:
         default=str(Path(__file__).resolve().parent.parent / "models" / "yolo12n.onnx"),
         help="Destination path for the exported ONNX file",
     )
+    parser.add_argument(
+        "--quantize",
+        action="store_true",
+        help="Also produce a dynamically-quantized (INT8 weights) copy alongside the fp32 one",
+    )
     args = parser.parse_args()
 
     from ultralytics import YOLO
 
     model = YOLO(args.model)
-    exported = model.export(format="onnx", imgsz=args.imgsz, opset=12, simplify=True)
+    # dynamic=True keeps height/width as symbolic ONNX dims instead of baking in a fixed
+    # imgsz - required for YOLO_INPUT_SIZE to actually be adjustable at runtime (e.g. the
+    # "low" device profile's 320px default) rather than onnxruntime rejecting the shape.
+    exported = model.export(format="onnx", imgsz=args.imgsz, opset=12, simplify=True, dynamic=True)
 
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     shutil.move(str(exported), str(out_path))
     print(f"Wrote {out_path}")
+
+    if args.quantize:
+        from onnxruntime.quantization import QuantType, quantize_dynamic
+        from onnxruntime.quantization.shape_inference import quant_pre_process
+
+        preprocessed_path = out_path.with_name(out_path.stem + "-preprocessed.onnx")
+        int8_path = out_path.with_name(out_path.stem + "-int8.onnx")
+        # skip_symbolic_shape=True: full symbolic shape inference doesn't complete on a
+        # model with dynamic H/W dims (basic ONNX shape inference + node fusion still run).
+        quant_pre_process(str(out_path), str(preprocessed_path), skip_symbolic_shape=True)
+        quantize_dynamic(str(preprocessed_path), str(int8_path), weight_type=QuantType.QUInt8)
+        preprocessed_path.unlink()
+        print(f"Wrote {int8_path}")
 
 
 if __name__ == "__main__":

@@ -49,6 +49,63 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
   safety net so a person who walks in and immediately holds still is still caught. Cuts
   average CPU/GPU load on scenes that are empty most of the time. Disable with
   `MOTION_GATING_ENABLED=false` if continuous full-rate inference is required.
+- **Adaptive frame skip**: each camera worker tracks a rolling average of its own
+  inference time. If a device can't keep up with `PROCESS_FPS`, the worker backs its
+  target rate off to whatever it can actually sustain instead of continuously falling
+  further behind. Disable with `ADAPTIVE_FRAME_SKIP=false`.
+- **Inference concurrency cap**: `MAX_CONCURRENT_INFERENCE` (0 = unlimited) bounds how
+  many camera workers may run AI inference at the same instant, shared process-wide via
+  an `asyncio.Semaphore`. On a single-board computer, several cameras all inferring in
+  parallel thrashes the CPU worse than making them take turns - each finishes faster with
+  exclusive use of the core budget than all of them crawling forward together.
+
+## Device profiles (Raspberry Pi / low-power tuning)
+
+`DEVICE_PROFILE` (default `auto`) resolves at startup to `low`/`balanced`/`high` and
+adjusts a set of performance-sensitive defaults accordingly - model input sizes, ONNX
+Runtime thread counts, target FPS, motion-gating thresholds, and (for `low`) which model
+files/packs are used. `auto` classifies the host from `platform.machine()` and CPU count
+(`app/vision/hw.py::detect_device_class`): an ARM board with 4 or fewer CPUs (Raspberry
+Pi 3/4/5 and similar SBCs) resolves to `low`; ARM architecture alone is not treated as a
+weak-device signal (Apple Silicon, AWS Graviton, etc. are ARM and fast), only ARM paired
+with a modest core count is.
+
+The override only touches settings still at their hardcoded default - anything you've
+set explicitly in `.env` (even to a value that happens to match the default) is left
+alone. This is checked against the field's default, not whether it appears in `.env`,
+since `.env.example` spells out an explicit value for nearly everything and
+`env_file: .env` injects all of it as real process env vars either way.
+
+The `low` tier:
+
+- `YOLO_PERSON_MODEL_PATH` -> `yolo12n-int8.onnx`, a dynamically-quantized (INT8
+  weights) copy the Docker build produces alongside the fp32 model. Roughly a third
+  the size and noticeably faster on CPUs without AVX512/VNNI - i.e. essentially any
+  ARM SBC. Produced via `onnxruntime.quantization.quantize_dynamic` after the
+  recommended `quant_pre_process` shape-inference pass (see the `model-export` stage
+  in `ai-service/Dockerfile` / `docker/ai-service.Dockerfile`, or run
+  `scripts/export_yolo_person_model.py --quantize` for local/dev use).
+- `YOLO_INPUT_SIZE` / `YOLO_FACE_DET_SIZE` drop from 640 to 320, `INSIGHTFACE_DET_SIZE`
+  from 960 to 480, and `INSIGHTFACE_MODEL` switches from `buffalo_l` to InsightFace's
+  smaller `buffalo_s` pack (downloads automatically the same way as `buffalo_l`).
+- `ONNX_INTRA_OP_THREADS`/`ONNX_INTER_OP_THREADS` are capped so one camera's inference
+  doesn't claim every core, and `MAX_CONCURRENT_INFERENCE=1` serializes multiple
+  cameras instead of letting them contend.
+- `PROCESS_FPS` drops to 1.0 and motion-gating thresholds loosen, since a slower device
+  should aim to do less work per second, not just the same work faster.
+
+InsightFace's own model loader (`insightface.model_zoo.get_model`) only ever forwards
+`providers`/`provider_options` on to ONNX Runtime - any other kwarg, including
+`sess_options`, is silently dropped. There's no supported way to hand it a tuned
+`SessionOptions` directly, so `InsightFaceProvider._configure_thread_settings()` patches
+the `PickableInferenceSession` class it instantiates internally instead, so every
+sub-model it loads (detector, recognizer, genderage, ...) picks up the thread cap. This
+only patches anything at all when `ONNX_INTRA_OP_THREADS`/`ONNX_INTER_OP_THREADS` are
+actually set (i.e. never on the default `high` profile).
+
+Override the resolved tier explicitly (`DEVICE_PROFILE=low|balanced|high`) if
+auto-detection picks the wrong one for a given board, or to try low-power settings on
+a machine that wouldn't otherwise qualify.
 
 ## Runtime services
 

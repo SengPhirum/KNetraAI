@@ -6,7 +6,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from .hw import resolve_onnx_providers
+from .hw import apply_thread_settings, resolve_onnx_providers
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +41,7 @@ class YoloOnnxPersonDetector:
         providers, _ctx_id = resolve_onnx_providers(providers_setting)
         session_options = ort.SessionOptions()
         session_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        apply_thread_settings(session_options)
         self.session = ort.InferenceSession(str(path), sess_options=session_options, providers=providers)
         self.input_name = self.session.get_inputs()[0].name
         self.input_size = int(input_size)

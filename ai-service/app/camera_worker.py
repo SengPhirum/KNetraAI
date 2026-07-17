@@ -19,6 +19,15 @@ from .vision.base import FaceResult, VisionProvider
 
 logger = logging.getLogger(__name__)
 
+# Shared across every CameraWorker in this process. On a constrained device (e.g. a
+# 4-core Raspberry Pi), letting every running camera try to run YOLO/InsightFace at the
+# same instant thrashes the CPU far worse than making them take turns - each inference
+# finishes faster with exclusive use of the core budget than all of them crawling
+# forward in parallel. 0/unset means unlimited (desktop/server-class hosts).
+_inference_semaphore: asyncio.Semaphore | None = (
+    asyncio.Semaphore(settings.max_concurrent_inference) if settings.max_concurrent_inference > 0 else None
+)
+
 
 class _LatestFrameReader:
     """Reads an RTSP stream on a dedicated thread and keeps only the newest frame.
@@ -139,6 +148,10 @@ class CameraWorker:
                 last_processed = 0.0
                 last_frame_id = -1
                 motion_reference: np.ndarray | None = None
+                # Rolling estimate of how long this device actually takes to run
+                # inference, used to self-pace the target rate on slower hardware
+                # instead of continuously trying (and failing) to hit process_fps.
+                inference_time_ema: float | None = None
                 while self.running:
                     frame_id, frame, error = reader.latest()
                     if error:
@@ -149,14 +162,23 @@ class CameraWorker:
                     last_frame_id = frame_id
 
                     now = monotonic()
-                    should_process = self.ai_enabled and now - last_processed >= min_interval
+                    effective_min_interval = min_interval
+                    if settings.adaptive_frame_skip and inference_time_ema is not None:
+                        effective_min_interval = max(min_interval, inference_time_ema * 1.1)
+                    should_process = self.ai_enabled and now - last_processed >= effective_min_interval
                     if should_process and settings.motion_gating_enabled:
                         should_process, motion_reference = self._gate_on_motion(
                             frame, motion_reference, now, last_processed
                         )
                     if should_process:
                         last_processed = now
-                        faces = await asyncio.to_thread(self.provider.detect_and_embed, frame)
+                        inference_started = monotonic()
+                        faces = await self._detect(frame)
+                        if settings.adaptive_frame_skip:
+                            elapsed = monotonic() - inference_started
+                            inference_time_ema = (
+                                elapsed if inference_time_ema is None else (0.7 * inference_time_ema + 0.3 * elapsed)
+                            )
                         overlays: list[dict[str, Any]] = []
                         for face in faces:
                             if face.metadata.get("detection_kind") == "person" or not face.embedding:
@@ -182,6 +204,12 @@ class CameraWorker:
                 if reader is not None:
                     await asyncio.to_thread(reader.release)
         self.status = "stopped"
+
+    async def _detect(self, frame: np.ndarray) -> list[FaceResult]:
+        if _inference_semaphore is not None:
+            async with _inference_semaphore:
+                return await asyncio.to_thread(self.provider.detect_and_embed, frame)
+        return await asyncio.to_thread(self.provider.detect_and_embed, frame)
 
     @staticmethod
     def _gate_on_motion(

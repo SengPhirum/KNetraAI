@@ -12,7 +12,7 @@ import numpy as np
 
 from ..config import settings
 from .base import EmbeddingResult, FaceResult, dedupe_faces, is_valid_face_bbox, normalize_vector
-from .hw import resolve_onnx_providers
+from .hw import apply_thread_settings, resolve_onnx_providers
 
 
 class InsightFaceProvider:
@@ -43,6 +43,8 @@ class InsightFaceProvider:
             )
             resolved_det_size = max(320, int(det_size if det_size is not None else settings.insightface_det_size))
             self.model_version = f"insightface_{settings.insightface_model}_{resolved_det_size}"
+
+            self._configure_thread_settings()
             self.app = FaceAnalysis(
                 name=settings.insightface_model,
                 root=settings.insightface_model_root,
@@ -76,6 +78,41 @@ class InsightFaceProvider:
             os.dup2(saved_stderr, stderr_fd)
             os.close(saved_stdout)
             os.close(saved_stderr)
+
+    @staticmethod
+    def _configure_thread_settings() -> None:
+        """FaceAnalysis loads each sub-model (detector, recognizer, genderage, ...)
+        through insightface.model_zoo.get_model(), which only ever forwards
+        ``providers``/``provider_options`` on to onnxruntime - any other kwarg
+        (including ``sess_options``) is silently dropped, so there's no supported
+        way to hand it a tuned SessionOptions directly. Patch the InferenceSession
+        subclass it instantiates internally instead, so every sub-model it loads
+        picks up our thread-count cap without needing insightface to support it.
+        Only patches anything if onnx_intra/inter_op_threads are actually set
+        (default "high" profile leaves ONNX Runtime's own defaults untouched).
+        """
+        if int(settings.onnx_intra_op_threads) <= 0 and int(settings.onnx_inter_op_threads) <= 0:
+            return
+
+        from insightface.model_zoo import model_zoo as _model_zoo
+
+        session_cls = _model_zoo.PickableInferenceSession
+        if getattr(session_cls, "_knetraai_thread_patched", False):
+            return
+
+        import onnxruntime as ort
+
+        original_init = session_cls.__init__
+
+        def patched_init(self, model_path, **kwargs):
+            if "sess_options" not in kwargs:
+                opts = ort.SessionOptions()
+                apply_thread_settings(opts)
+                kwargs["sess_options"] = opts
+            original_init(self, model_path, **kwargs)
+
+        session_cls.__init__ = patched_init
+        session_cls._knetraai_thread_patched = True
 
     @staticmethod
     def _configure_onnxruntime_logging() -> None:

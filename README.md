@@ -146,6 +146,26 @@ INSIGHTFACE_DET_SIZE=960
 
 Production recognition quality depends on camera angle, lighting, face image quality, enrollment photos, model choice, and threshold tuning.
 
+## Running on a Raspberry Pi / small device
+
+The AI service auto-detects Raspberry-Pi-class ARM boards and low-core hosts at startup
+(`DEVICE_PROFILE=auto`, the default) and lowers model input sizes, ONNX Runtime thread
+counts, target FPS, and switches to a dynamically-quantized YOLO model + InsightFace's
+smaller `buffalo_s` pack - no manual tuning required for a typical single-camera Pi setup.
+Requires a 64-bit OS (Raspberry Pi OS 64-bit / Ubuntu 22.04+ on a Pi 4 or 5) since ONNX
+Runtime only ships CPU wheels for `aarch64`, not 32-bit `armv7l`.
+
+Force a tier explicitly, or tune the underlying knobs, if auto-detection picks the wrong
+one or you're running several cameras on one board:
+
+```env
+DEVICE_PROFILE=low          # or balanced/high - auto-detected by default
+MAX_CONCURRENT_INFERENCE=1  # cap concurrent camera inference on a multi-camera Pi
+```
+
+See [Architecture -> Device profiles](docs/architecture.md#device-profiles-raspberry-pi--low-power-tuning)
+for exactly what each tier changes.
+
 ## Main environment variables
 
 See `.env.example` and `docker/.env.production.example` for all values.
