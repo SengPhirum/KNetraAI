@@ -1,7 +1,9 @@
 <template>
   <div ref="tileRef" class="stream-tile" :class="{ fullscreen: isFullscreen }">
-    <img v-if="src && !errored" :src="cacheBustedSrc" :alt="camera?.name" @error="onError" @load="errored = false" />
-    <img v-else-if="fallbackImage" :src="fallbackImage" :alt="camera?.name" class="fallback" />
+    <!-- draggable=false so dragging a live-view tile rearranges the grid instead of
+         picking up the stream image itself -->
+    <img v-if="src && !errored" :src="cacheBustedSrc" :alt="camera?.name" draggable="false" @error="onError" @load="errored = false" />
+    <img v-else-if="fallbackImage" :src="fallbackImage" :alt="camera?.name" class="fallback" draggable="false" />
     <div v-else class="placeholder"><span>{{ errored ? 'Reconnecting...' : fallbackText }}</span></div>
 
     <span v-if="src && !errored" class="live-dot">LIVE</span>

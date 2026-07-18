@@ -26,6 +26,7 @@
         <h2 class="card-title" style="margin: 0;">Live View</h2>
         <div class="btn-row" v-if="!focusedCamera">
           <button v-for="opt in layoutOptions" :key="opt" class="btn sm secondary" :class="{ active: layout === opt }" @click="setLayout(opt)">{{ opt }}-up</button>
+          <button class="btn sm" type="button" @click="showPicker = true">+ Add Camera</button>
         </div>
       </div>
 
@@ -34,16 +35,9 @@
       </div>
 
       <template v-else>
-        <div v-if="hiddenCameras.length" class="hidden-bar">
-          <span class="hidden-label">Removed from view:</span>
-          <button v-for="camera in hiddenCameras" :key="camera.id" class="btn sm secondary" type="button" @click="restoreCamera(camera.id)">
-            + {{ camera.name }}
-          </button>
-          <button class="btn sm secondary" type="button" @click="restoreAll">Restore all</button>
-        </div>
-
         <div v-if="!visibleCameras.length" style="text-align: center; color: var(--text-muted); padding: 2rem 1rem;">
-          All channels are removed from view. Restore one above.
+          <p style="margin: 0 0 0.75rem;">All channels are removed from view.</p>
+          <button class="btn" type="button" @click="showPicker = true">+ Add Camera</button>
         </div>
 
         <div v-else-if="focusedCamera">
@@ -63,6 +57,7 @@
           </div>
           <div class="btn-row" style="margin-top: 0.85rem;">
             <button v-if="canStart(focusedCamera)" class="btn sm" :disabled="isBusy" @click="startLive(focusedCamera)">Start Live</button>
+            <button v-if="canStopWorker(focusedCamera)" class="btn sm secondary" :disabled="isBusy" @click="stopLive(focusedCamera)">Stop Live</button>
             <template v-if="canOperate">
               <button class="btn sm" :disabled="!canEnableAi(focusedCamera)" @click="enableAi(focusedCamera)">Enable AI</button>
               <button class="btn sm secondary" :disabled="!canDisableAi(focusedCamera)" @click="disableAi(focusedCamera)">Disable AI</button>
@@ -73,8 +68,20 @@
 
         <template v-else>
           <div class="live-grid" :style="gridStyle">
-            <div v-for="camera in pagedCameras" :key="camera.id" class="grid-tile">
+            <div
+              v-for="camera in pagedCameras"
+              :key="camera.id"
+              class="grid-tile"
+              :class="{ dragging: draggingId === camera.id, 'drop-target': dragOverId === camera.id && draggingId && draggingId !== camera.id }"
+              draggable="true"
+              @dragstart="onDragStart(camera, $event)"
+              @dragover.prevent="dragOverId = camera.id"
+              @dragleave="dragOverId === camera.id && (dragOverId = null)"
+              @drop.prevent="onDropTile(camera)"
+              @dragend="onDragEnd"
+            >
               <div class="tile-header">
+                <span class="drag-handle" title="Drag to rearrange">⠿</span>
                 <strong class="truncate" :title="camera.name">{{ camera.name }}</strong>
                 <div class="btn-row tile-badges">
                   <span class="badge dot" :class="statusClass(camera.status)">{{ camera.status }}</span>
@@ -97,6 +104,7 @@
               </div>
               <div class="btn-row" style="margin-top: 0.5rem;">
                 <button v-if="canStart(camera)" class="btn sm" :disabled="isBusy" @click="startLive(camera)">Start Live</button>
+                <button v-if="canStopWorker(camera)" class="btn sm secondary" :disabled="isBusy" @click="stopLive(camera)">Stop Live</button>
                 <template v-if="canOperate">
                   <button class="btn sm" :disabled="!canEnableAi(camera)" @click="enableAi(camera)">Enable AI</button>
                   <button class="btn sm secondary" :disabled="!canDisableAi(camera)" @click="disableAi(camera)">Disable AI</button>
@@ -106,9 +114,28 @@
             </div>
           </div>
           <div v-if="totalPages > 1" class="btn-row" style="justify-content: center; margin-top: 0.85rem;">
-            <button class="btn sm secondary" :disabled="safePage === 0" @click="page = safePage - 1">Prev</button>
-            <span style="align-self: center; font-size: 0.85rem; color: var(--text-muted);">Page {{ safePage + 1 }} / {{ totalPages }}</span>
-            <button class="btn sm secondary" :disabled="safePage >= totalPages - 1" @click="page = safePage + 1">Next</button>
+            <button
+              class="btn sm secondary"
+              :class="{ 'page-drop': draggingId && safePage > 0 }"
+              :disabled="safePage === 0 && !draggingId"
+              @click="page = safePage - 1"
+              @dragover.prevent="onPageDragOver(-1)"
+              @dragleave="onPageDragLeave"
+              @drop.prevent="onDropPage(-1)"
+            >Prev</button>
+            <span style="align-self: center; font-size: 0.85rem; color: var(--text-muted);">
+              Page {{ safePage + 1 }} / {{ totalPages }}
+              <template v-if="draggingId"> - drop on Prev/Next to move between pages</template>
+            </span>
+            <button
+              class="btn sm secondary"
+              :class="{ 'page-drop': draggingId && safePage < totalPages - 1 }"
+              :disabled="safePage >= totalPages - 1 && !draggingId"
+              @click="page = safePage + 1"
+              @dragover.prevent="onPageDragOver(1)"
+              @dragleave="onPageDragLeave"
+              @drop.prevent="onDropPage(1)"
+            >Next</button>
           </div>
         </template>
       </template>
@@ -146,6 +173,13 @@
     </section>
 
     <SnapshotModal :event="selectedEvent" :api-base-url="apiBaseUrl" @close="selectedEvent = null" />
+    <CameraPickerModal
+      :show="showPicker"
+      :in-view-ids="visibleCameraIds"
+      @close="showPicker = false"
+      @add="addToView"
+      @remove="hideFromView"
+    />
   </div>
 </template>
 
@@ -169,8 +203,13 @@ const page = ref(0)
 const focusedCameraId = ref<string | null>(null)
 
 const HIDDEN_KEY = 'live.hidden_camera_ids'
+const ORDER_KEY = 'live.camera_order'
 const hiddenIds = ref<string[]>(import.meta.client ? JSON.parse(localStorage.getItem(HIDDEN_KEY) || '[]') : [])
 const persistHidden = () => { if (import.meta.client) localStorage.setItem(HIDDEN_KEY, JSON.stringify(hiddenIds.value)) }
+const cameraOrder = ref<string[]>(import.meta.client ? JSON.parse(localStorage.getItem(ORDER_KEY) || '[]') : [])
+const persistOrder = () => { if (import.meta.client) localStorage.setItem(ORDER_KEY, JSON.stringify(cameraOrder.value)) }
+
+const showPicker = ref(false)
 
 const voiceSettings = ref<ReturnType<typeof voiceSettingsFromList>>({
   enabled: false, greetKnown: true, greetUnknown: true, repeatSeconds: 60, rate: 1, volume: 1, voiceName: ''
@@ -198,8 +237,18 @@ const loadVoiceSettings = async () => {
   }
 }
 
-const visibleCameras = computed(() => cameras.value.filter(c => !hiddenIds.value.includes(c.id)))
-const hiddenCameras = computed(() => cameras.value.filter(c => hiddenIds.value.includes(c.id)))
+// Cameras in the user's saved arrangement first, then any new/unordered ones.
+const orderedCameras = computed(() => {
+  const position = new Map(cameraOrder.value.map((id, index) => [id, index]))
+  return [...cameras.value].sort((a, b) => {
+    const pa = position.has(a.id) ? position.get(a.id)! : Number.MAX_SAFE_INTEGER
+    const pb = position.has(b.id) ? position.get(b.id)! : Number.MAX_SAFE_INTEGER
+    return pa - pb
+  })
+})
+
+const visibleCameras = computed(() => orderedCameras.value.filter(c => !hiddenIds.value.includes(c.id)))
+const visibleCameraIds = computed(() => visibleCameras.value.map(c => c.id))
 
 const latestByCamera = computed(() => {
   const byCamera = new Map<string, any>()
@@ -237,6 +286,7 @@ const typeClass = (type: string) => type === 'staff' ? 'info' : type === 'custom
 
 const isBusy = ref(false)
 const canStart = (camera: any) => canOperate.value && Boolean(camera?.enabled) && !runningStatuses.has(camera.status)
+const canStopWorker = (camera: any) => canOperate.value && runningStatuses.has(camera?.status)
 const canEnableAi = (camera: any) => Boolean(camera?.enabled) && runningStatuses.has(camera.status) && !camera.ai_enabled && !isBusy.value
 const canDisableAi = (camera: any) => Boolean(camera?.ai_enabled) && !isBusy.value
 
@@ -254,6 +304,7 @@ const callCamera = async (path: string, body?: any) => {
 }
 
 const startLive = (camera: any) => callCamera(`/cameras/${camera.id}/start`)
+const stopLive = (camera: any) => callCamera(`/cameras/${camera.id}/stop`)
 const enableAi = (camera: any) => callCamera(`/cameras/${camera.id}/ai`, { enabled: true })
 const disableAi = (camera: any) => callCamera(`/cameras/${camera.id}/ai`, { enabled: false })
 
@@ -269,14 +320,81 @@ const removeFromView = async (camera: any) => {
   if (stopIt) await callCamera(`/cameras/${camera.id}/stop`)
 }
 
-const restoreCamera = (cameraId: string) => {
-  hiddenIds.value = hiddenIds.value.filter(id => id !== cameraId)
+// Modal "Add to view": unhide the channel; if its worker is stopped, the tile
+// shows offline with a Start Live button (starting stays an explicit action).
+const addToView = (camera: any) => {
+  hiddenIds.value = hiddenIds.value.filter(id => id !== camera.id)
   persistHidden()
 }
 
-const restoreAll = () => {
-  hiddenIds.value = []
-  persistHidden()
+// Modal "Remove": composing the view only - hides the tile without touching the
+// worker (the tile's ✕ is the action that also stops it).
+const hideFromView = (camera: any) => {
+  if (!hiddenIds.value.includes(camera.id)) {
+    hiddenIds.value = [...hiddenIds.value, camera.id]
+    persistHidden()
+  }
+  if (focusedCameraId.value === camera.id) focusedCameraId.value = null
+}
+
+// ---------------- Drag & drop tile arrangement ----------------
+const draggingId = ref<string | null>(null)
+const dragOverId = ref<string | null>(null)
+let pageFlipTimer: ReturnType<typeof setTimeout> | null = null
+
+const onDragStart = (camera: any, event: DragEvent) => {
+  draggingId.value = camera.id
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', camera.id)
+  }
+}
+
+const onDragEnd = () => {
+  draggingId.value = null
+  dragOverId.value = null
+  if (pageFlipTimer) { clearTimeout(pageFlipTimer); pageFlipTimer = null }
+}
+
+/** Insert the dragged camera at `insertAt` within the visible list (computed
+ *  after removing it), then persist visible order + hidden ids as the new order. */
+const reorderVisible = (insertAt: number) => {
+  if (!draggingId.value) return
+  const ids = visibleCameraIds.value.filter(id => id !== draggingId.value)
+  ids.splice(Math.max(0, Math.min(insertAt, ids.length)), 0, draggingId.value)
+  cameraOrder.value = [...ids, ...hiddenIds.value]
+  persistOrder()
+}
+
+const onDropTile = (target: any) => {
+  if (!draggingId.value || draggingId.value === target.id) { onDragEnd(); return }
+  const ids = visibleCameraIds.value.filter(id => id !== draggingId.value)
+  reorderVisible(ids.indexOf(target.id))
+  onDragEnd()
+}
+
+// Hovering Prev/Next for a moment while dragging flips the page so the tile
+// can be dropped precisely on the other page.
+const onPageDragOver = (direction: number) => {
+  if (!draggingId.value || pageFlipTimer) return
+  pageFlipTimer = setTimeout(() => {
+    pageFlipTimer = null
+    const target = safePage.value + direction
+    if (target >= 0 && target < totalPages.value) page.value = target
+  }, 600)
+}
+
+const onPageDragLeave = () => {
+  if (pageFlipTimer) { clearTimeout(pageFlipTimer); pageFlipTimer = null }
+}
+
+// Dropping directly on Prev/Next moves the camera to the start of that page.
+const onDropPage = (direction: number) => {
+  if (!draggingId.value) return
+  const targetPage = Math.max(0, Math.min(safePage.value + direction, totalPages.value - 1))
+  reorderVisible(targetPage * layout.value)
+  page.value = targetPage
+  onDragEnd()
 }
 
 const clearEvents = async () => {
@@ -365,21 +483,27 @@ onBeforeUnmount(() => {
   color: var(--danger);
 }
 
-.hidden-bar {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  flex-wrap: wrap;
-  margin-bottom: 0.85rem;
-  padding: 0.5rem 0.65rem;
-  background: color-mix(in srgb, var(--border) 30%, transparent);
-  border-radius: 0.5rem;
+.drag-handle {
+  cursor: grab;
+  color: var(--text-muted);
+  font-size: 0.95rem;
+  line-height: 1;
+  user-select: none;
+  flex-shrink: 0;
 }
 
-.hidden-label {
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: var(--text-muted);
+.grid-tile.dragging {
+  opacity: 0.45;
+}
+
+.grid-tile.drop-target .stream-box {
+  outline: 3px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.page-drop {
+  outline: 2px dashed var(--primary);
+  outline-offset: 2px;
 }
 
 .stream-box {
