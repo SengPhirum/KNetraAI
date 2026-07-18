@@ -495,7 +495,16 @@ textarea {
 }
 
 .discovery-form {
-  align-items: end;
+  /* Top-align every field so a hint under one cell (e.g. "Stream type to fetch")
+     doesn't push its neighbours' inputs down into a bottom-aligned zigzag. */
+  align-items: start;
+}
+
+.discovery-form .form-actions {
+  align-items: flex-start;
+  /* Offset equal to a .label line (0.8rem text + 0.3rem gap) so the button
+     lines up with the input boxes, not the labels above them. */
+  padding-top: 1.5rem;
 }
 
 .discovery-results {

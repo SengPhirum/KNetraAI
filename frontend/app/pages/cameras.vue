@@ -9,7 +9,7 @@
         <button class="btn secondary" type="button" :disabled="loading" @click="load">
           {{ loading ? 'Refreshing...' : 'Refresh' }}
         </button>
-        <button class="btn secondary" type="button" @click="showHelp = !showHelp">
+        <button v-if="canManage" class="btn secondary" type="button" @click="showHelp = !showHelp">
           {{ showHelp ? 'Hide Help' : 'Setup Help' }}
         </button>
       </div>
@@ -34,9 +34,9 @@
       </div>
     </div>
 
-    <CameraDiscoveryPanel @added="load" />
+    <CameraDiscoveryPanel v-if="canManage" @added="load" />
 
-    <section id="manual-camera-form" class="card">
+    <section v-if="canManage" id="manual-camera-form" class="card">
       <div class="section-heading">
         <div>
           <p class="section-kicker">Manual setup</p>
@@ -80,7 +80,7 @@
       <p v-if="error" class="error">{{ error }}</p>
     </section>
 
-    <section v-if="showHelp" class="card camera-help">
+    <section v-if="showHelp && canManage" class="card camera-help">
       <h2 class="card-title">Camera Setup Help</h2>
       <p class="section-text">
         RTSP URLs use <code>rtsp://username:password@camera-ip:554/stream-path</code>. Use the local camera login.
@@ -145,7 +145,7 @@
         </div>
       </div>
 
-      <div v-if="selectedIds.size" class="action-bar bulk-action-bar">
+      <div v-if="canManage && selectedIds.size" class="action-bar bulk-action-bar">
         <div class="muted-cell">{{ selectedIds.size }} camera{{ selectedIds.size === 1 ? '' : 's' }} selected</div>
         <div class="btn-row">
           <button class="btn sm" type="button" :disabled="bulkRunning || !selectedStartableCount" @click="bulkStart">
@@ -154,7 +154,7 @@
           <button class="btn sm secondary" type="button" :disabled="bulkRunning || !selectedStoppableCount" @click="bulkStop">
             {{ bulkRunning && bulkActionLabel === 'stop' ? 'Stopping...' : `Stop Selected (${selectedStoppableCount})` }}
           </button>
-          <button class="btn sm danger" type="button" :disabled="bulkRunning" @click="bulkDelete">
+          <button v-if="isAdmin" class="btn sm danger" type="button" :disabled="bulkRunning" @click="bulkDelete">
             {{ bulkRunning && bulkActionLabel === 'delete' ? 'Deleting...' : `Delete Selected (${selectedIds.size})` }}
           </button>
           <button class="btn sm secondary" type="button" :disabled="bulkRunning" @click="clearSelection">Clear</button>
@@ -167,7 +167,7 @@
           <caption class="sr-only">Configured cameras</caption>
           <thead>
             <tr>
-              <th scope="col" class="checkbox-col">
+              <th v-if="canManage" scope="col" class="checkbox-col">
                 <input
                   ref="selectAllRef"
                   type="checkbox"
@@ -183,16 +183,15 @@
               <th scope="col">Source</th>
               <th scope="col">Active</th>
               <th scope="col">Live</th>
-              <th scope="col">RTSP</th>
               <th scope="col">Actions</th>
             </tr>
           </thead>
           <tbody>
             <tr v-if="!visibleCameras.length">
-              <td colspan="9" class="empty-row">{{ emptyMessage }}</td>
+              <td :colspan="canManage ? 8 : 7" class="empty-row">{{ emptyMessage }}</td>
             </tr>
             <tr v-for="camera in visibleCameras" :key="camera.id" :class="{ 'row-selected': selectedIds.has(camera.id) }">
-              <td>
+              <td v-if="canManage">
                 <input
                   type="checkbox"
                   :checked="selectedIds.has(camera.id)"
@@ -226,17 +225,19 @@
               <td><span class="badge" :class="camera.source === 'onvif' ? 'info' : ''">{{ camera.source === 'onvif' ? 'ONVIF' : 'Manual' }}</span></td>
               <td><span class="badge dot" :class="camera.enabled ? 'success' : ''">{{ camera.enabled ? 'Active' : 'Disabled' }}</span></td>
               <td><span class="badge dot" :class="statusClass(camera.status)">{{ statusLabel(camera.status) }}</span></td>
-              <td class="truncate" :title="camera.rtsp_url">{{ maskRtsp(camera.rtsp_url) }}</td>
               <td>
                 <div class="btn-row action-buttons">
-                  <button class="btn sm secondary" type="button" @click="edit(camera)">Edit</button>
+                  <button v-if="canManage" class="btn sm secondary" type="button" @click="edit(camera)">Edit</button>
                   <button class="btn sm" type="button" :disabled="!canStartLive(camera)" @click="start(camera)">
                     {{ busyActions.get(camera.id) === 'start' ? 'Starting...' : 'Start Live' }}
                   </button>
                   <button class="btn sm secondary" type="button" :disabled="!canStopLive(camera)" @click="stop(camera)">
                     {{ busyActions.get(camera.id) === 'stop' ? 'Stopping...' : 'Stop Live' }}
                   </button>
-                  <button class="btn sm danger" type="button" :disabled="isBusy(camera)" @click="remove(camera)">
+                  <button v-if="isAdmin" class="btn sm secondary" type="button" :disabled="isBusy(camera)" @click="clearHistory(camera)">
+                    Clear History
+                  </button>
+                  <button v-if="isAdmin" class="btn sm danger" type="button" :disabled="isBusy(camera)" @click="remove(camera)">
                     {{ busyActions.get(camera.id) === 'delete' ? 'Deleting...' : 'Delete' }}
                   </button>
                 </div>
@@ -252,6 +253,7 @@
           <div class="mobile-card-head">
             <label class="checkbox-label mobile-select">
               <input
+                v-if="canManage"
                 type="checkbox"
                 :checked="selectedIds.has(camera.id)"
                 :disabled="bulkRunning"
@@ -282,18 +284,20 @@
           <dl class="detail-grid">
             <div><dt>Source</dt><dd>{{ camera.source === 'onvif' ? 'ONVIF' : 'Manual' }}</dd></div>
             <div><dt>Active</dt><dd>{{ camera.enabled ? 'Active' : 'Disabled' }}</dd></div>
-            <div><dt>RTSP</dt><dd class="truncate">{{ maskRtsp(camera.rtsp_url) }}</dd></div>
             <div v-if="camera.last_error"><dt>Error</dt><dd class="danger-text">{{ camera.last_error }}</dd></div>
           </dl>
           <div class="btn-row action-buttons">
-            <button class="btn sm secondary" type="button" @click="edit(camera)">Edit</button>
+            <button v-if="canManage" class="btn sm secondary" type="button" @click="edit(camera)">Edit</button>
             <button class="btn sm" type="button" :disabled="!canStartLive(camera)" @click="start(camera)">
               {{ busyActions.get(camera.id) === 'start' ? 'Starting...' : 'Start Live' }}
             </button>
             <button class="btn sm secondary" type="button" :disabled="!canStopLive(camera)" @click="stop(camera)">
               {{ busyActions.get(camera.id) === 'stop' ? 'Stopping...' : 'Stop Live' }}
             </button>
-            <button class="btn sm danger" type="button" :disabled="isBusy(camera)" @click="remove(camera)">
+            <button v-if="isAdmin" class="btn sm secondary" type="button" :disabled="isBusy(camera)" @click="clearHistory(camera)">
+              Clear History
+            </button>
+            <button v-if="isAdmin" class="btn sm danger" type="button" :disabled="isBusy(camera)" @click="remove(camera)">
               {{ busyActions.get(camera.id) === 'delete' ? 'Deleting...' : 'Delete' }}
             </button>
           </div>
@@ -328,6 +332,7 @@ type BulkAction = 'start' | 'stop' | 'delete'
 type SnapshotResponse = { ok: boolean; thumbnail?: string; error?: string; source?: string }
 
 const { apiFetch } = useApi()
+const { isAdmin, canManage } = useCurrentUser()
 const cameras = ref<Camera[]>([])
 const error = ref('')
 const showHelp = ref(false)
@@ -443,10 +448,6 @@ const statusLabel = (status: string) => {
   if (!status) return 'Offline'
   if (status === 'running') return 'Live'
   return status.replace(/_/g, ' ')
-}
-
-const maskRtsp = (url: string) => {
-  return url.replace(/(rtsp:\/\/[^:/@]+:)([^@]+)(@)/i, '$1***$3')
 }
 
 const isBusy = (camera: Camera) => busyActions.has(camera.id)
@@ -583,6 +584,21 @@ const stop = async (camera: Camera) => {
   })
   if (!result.ok) error.value = result.error
   await load()
+}
+
+const clearHistory = async (camera: Camera) => {
+  if (!confirm(`Delete ALL detection history (events + snapshots) recorded by "${camera.name}"? This cannot be undone.`)) return
+  error.value = ''
+  bulkMessage.value = ''
+  try {
+    const result = await apiFetch<{ deleted: number, snapshots_removed: number }>('/detection-events/clear', {
+      method: 'POST',
+      body: { camera_id: camera.id }
+    })
+    bulkMessage.value = `Cleared ${result.deleted} event(s) and ${result.snapshots_removed} snapshot(s) for ${camera.name}.`
+  } catch (e: any) {
+    error.value = e?.data?.detail || e.message || 'Could not clear history.'
+  }
 }
 
 const remove = async (camera: Camera) => {

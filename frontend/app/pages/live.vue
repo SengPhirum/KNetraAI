@@ -63,9 +63,11 @@
           </div>
           <div class="btn-row" style="margin-top: 0.85rem;">
             <button v-if="canStart(focusedCamera)" class="btn sm" :disabled="isBusy" @click="startLive(focusedCamera)">Start Live</button>
-            <button class="btn sm" :disabled="!canEnableAi(focusedCamera)" @click="enableAi(focusedCamera)">Enable AI</button>
-            <button class="btn sm secondary" :disabled="!canDisableAi(focusedCamera)" @click="disableAi(focusedCamera)">Disable AI</button>
-            <button v-if="canOperate" class="btn sm danger" :disabled="isBusy" @click="removeFromView(focusedCamera)">✕ Remove from view</button>
+            <template v-if="canOperate">
+              <button class="btn sm" :disabled="!canEnableAi(focusedCamera)" @click="enableAi(focusedCamera)">Enable AI</button>
+              <button class="btn sm secondary" :disabled="!canDisableAi(focusedCamera)" @click="disableAi(focusedCamera)">Disable AI</button>
+            </template>
+            <button class="btn sm danger" :disabled="isBusy" @click="removeFromView(focusedCamera)">✕ Remove from view</button>
           </div>
         </div>
 
@@ -95,8 +97,10 @@
               </div>
               <div class="btn-row" style="margin-top: 0.5rem;">
                 <button v-if="canStart(camera)" class="btn sm" :disabled="isBusy" @click="startLive(camera)">Start Live</button>
-                <button class="btn sm" :disabled="!canEnableAi(camera)" @click="enableAi(camera)">Enable AI</button>
-                <button class="btn sm secondary" :disabled="!canDisableAi(camera)" @click="disableAi(camera)">Disable AI</button>
+                <template v-if="canOperate">
+                  <button class="btn sm" :disabled="!canEnableAi(camera)" @click="enableAi(camera)">Enable AI</button>
+                  <button class="btn sm secondary" :disabled="!canDisableAi(camera)" @click="disableAi(camera)">Disable AI</button>
+                </template>
                 <button class="btn sm secondary" @click="focusedCameraId = camera.id">Focus</button>
               </div>
             </div>

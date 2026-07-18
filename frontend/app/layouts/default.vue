@@ -28,8 +28,11 @@
 const route = useRoute()
 const { logout } = useApi()
 const { appearance, logoSrc } = useAppearance()
+const { role } = useCurrentUser()
 const isLogin = computed(() => route.path === '/login')
-const nav = [
+
+// roles: undefined = every signed-in role may open the page.
+const allNav = [
   {
     label: 'Overview',
     items: [
@@ -40,7 +43,7 @@ const nav = [
   {
     label: 'Operations',
     items: [
-      { to: '/cameras', label: 'Camera Management' },
+      { to: '/cameras', label: 'Camera Management', roles: ['Admin', 'Manager', 'Operator'] },
       { to: '/persons', label: 'Staff/Customer Database' },
       { to: '/detection-history', label: 'Detection History' }
     ]
@@ -48,12 +51,21 @@ const nav = [
   {
     label: 'Administration',
     items: [
-      { to: '/settings', label: 'Settings' },
-      { to: '/users', label: 'Users' },
-      { to: '/audit-logs', label: 'Audit Logs' }
+      { to: '/settings', label: 'Settings', roles: ['Admin'] },
+      { to: '/users', label: 'Users', roles: ['Admin', 'Manager'] },
+      { to: '/audit-logs', label: 'Audit Logs', roles: ['Admin', 'Manager'] }
     ]
   }
 ]
+
+const nav = computed(() =>
+  allNav
+    .map(group => ({
+      ...group,
+      items: group.items.filter((item: any) => !item.roles || item.roles.includes(role.value))
+    }))
+    .filter(group => group.items.length)
+)
 </script>
 
 <style scoped>

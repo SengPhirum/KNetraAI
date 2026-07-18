@@ -6,12 +6,12 @@
         <p class="page-subtitle">Registered people and their face enrollment status.</p>
       </div>
       <div class="btn-row">
-        <button class="btn secondary" @click="showImport = !showImport">{{ showImport ? 'Hide Import / Sync' : 'Import / Sync' }}</button>
-        <NuxtLink class="btn" to="/persons/new">Add Person</NuxtLink>
+        <button v-if="canManage" class="btn secondary" @click="showImport = !showImport">{{ showImport ? 'Hide Import / Sync' : 'Import / Sync' }}</button>
+        <NuxtLink v-if="canOperate" class="btn" to="/persons/new">Add Person</NuxtLink>
       </div>
     </div>
 
-    <div v-if="showImport" class="card" style="margin-bottom: 1rem;">
+    <div v-if="showImport && canManage" class="card" style="margin-bottom: 1rem;">
       <h2 class="card-title">Import / Sync People</h2>
       <div class="grid-cards" style="grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));">
         <div>
@@ -190,7 +190,7 @@
 
 <script setup lang="ts">
 const { apiFetch } = useApi()
-const { isAdmin } = useCurrentUser()
+const { isAdmin, canManage, canOperate } = useCurrentUser()
 const persons = ref<any[]>([])
 const filter = ref('')
 const biometricFilter = ref('')

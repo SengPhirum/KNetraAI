@@ -18,7 +18,8 @@ async def _enforce_password_rules(password: str) -> None:
 
 
 @router.get("")
-async def list_users(user=Depends(require_roles("Admin"))):
+async def list_users(user=Depends(require_roles("Admin", "Manager"))):
+    """Admins manage accounts; Managers get a read-only view of who has access."""
     rows = await fetch(
         """
         SELECT u.id, u.email, u.full_name, u.is_active, r.name AS role, u.created_at, u.updated_at
@@ -84,3 +85,15 @@ async def update_user(user_id: str, payload: UserUpdate, user=Depends(require_ro
     )
     await write_audit(user, "user.update", "user", user_id)
     return to_jsonable(row)
+
+
+@router.delete("/{user_id}")
+async def delete_user(user_id: str, user=Depends(require_roles("Admin"))):
+    if str(user.get("id")) == user_id:
+        raise HTTPException(status_code=400, detail="You cannot delete your own account")
+    existing = await fetchrow("SELECT id FROM users WHERE id = $1::uuid", user_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    await execute("DELETE FROM users WHERE id = $1::uuid", user_id)
+    await write_audit(user, "user.delete", "user", user_id)
+    return {"ok": True}

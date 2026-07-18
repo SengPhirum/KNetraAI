@@ -6,7 +6,7 @@
         <p v-if="person" class="page-subtitle" style="text-transform: capitalize;">{{ person.person_type }} profile and face enrollment.</p>
       </div>
       <div class="btn-row">
-        <button v-if="person && !editing" class="btn secondary" type="button" @click="startEdit">Edit Profile</button>
+        <button v-if="person && !editing && canOperate" class="btn secondary" type="button" @click="startEdit">Edit Profile</button>
         <button v-if="person && canManage" class="btn danger" type="button" @click="removePerson">Delete</button>
         <NuxtLink to="/persons" class="btn secondary">Back</NuxtLink>
       </div>
@@ -79,7 +79,7 @@
         </form>
       </div>
 
-      <div class="card">
+      <div v-if="canOperate" class="card">
         <h2 class="card-title">Face Enrollment</h2>
         <div class="tabs-mini">
           <button class="tab-mini" :class="{ active: enrollTab === 'scan' }" type="button" @click="enrollTab = 'scan'">Camera Scan</button>
@@ -112,7 +112,7 @@
             <span style="font-size: 0.8rem; color: var(--text-muted);">Quality: {{ image.quality_score ? Number(image.quality_score).toFixed(2) : '-' }}</span>
           </div>
           <p class="truncate" style="max-width: 100%; font-size: 0.78rem; color: var(--text-muted); margin: 0.35rem 0 0.5rem;" :title="image.original_filename">{{ image.original_filename }}</p>
-          <button class="btn sm danger" type="button" @click="removeImage(image)">Delete Image</button>
+          <button v-if="canOperate" class="btn sm danger" type="button" @click="removeImage(image)">Delete Image</button>
         </div>
       </div>
     </section>
@@ -122,7 +122,7 @@
 <script setup lang="ts">
 const route = useRoute()
 const { apiFetch, apiBaseUrl } = useApi()
-const { canManage } = useCurrentUser()
+const { canManage, canOperate } = useCurrentUser()
 
 const person = ref<any>(null)
 const file = ref<File | null>(null)
