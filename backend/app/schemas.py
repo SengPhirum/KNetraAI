@@ -93,6 +93,8 @@ class PersonCreate(BaseModel):
     customer_id: str | None = None
     customer_type: str | None = None
     vip_flag: bool = False
+    email: str | None = None
+    phone: str | None = None
     notes: str | None = None
     consent_confirmed: bool = False
 
@@ -108,7 +110,10 @@ class PersonUpdate(BaseModel):
     customer_id: str | None = None
     customer_type: str | None = None
     vip_flag: bool | None = None
+    email: str | None = None
+    phone: str | None = None
     notes: str | None = None
+    consent_confirmed: bool | None = None
 
 
 class LdapLoginRequest(BaseModel):
@@ -179,7 +184,41 @@ class DetectionEventCreate(BaseModel):
     gender_confidence: float | None = None
     greeting: str
     snapshot_path: str | None = None
+    # Estimated fraction of the face captured (bbox visibility x detection quality,
+    # 0-1). None means the AI provider could not compute it (treated as passing).
+    face_capture_score: float | None = None
     raw: dict[str, Any] = Field(default_factory=dict)
+
+
+class DetectionClearRequest(BaseModel):
+    """Admin bulk delete. With no filters set, every detection event is deleted."""
+
+    camera_id: str | None = None
+    person_type: Literal["staff", "customer", "unknown"] | None = None
+    date_from: str | None = None
+    date_to: str | None = None
+    event_ids: list[str] | None = None
+
+
+class PersonApiConfig(BaseModel):
+    """Configuration for pulling people from an external HR/CRM REST API."""
+
+    url: str = ""
+    method: Literal["GET", "POST"] = "GET"
+    # Header values saved as "" keep the previously stored value (secrets).
+    headers: dict[str, str] = Field(default_factory=dict)
+    body: str = ""
+    # Dot path to the array of records inside the response (empty = response root).
+    data_path: str = ""
+    default_person_type: Literal["staff", "customer"] = "staff"
+    mode: Literal["create", "upsert"] = "upsert"
+    # local field -> dot path in each API record, e.g. {"full_name": "profile.name"}
+    mapping: dict[str, str] = Field(default_factory=dict)
+
+
+class PersonApiSyncRequest(BaseModel):
+    preview: bool = False
+    limit: int = Field(default=0, ge=0, le=10000)  # 0 = no limit
 
 
 class SettingUpdate(BaseModel):

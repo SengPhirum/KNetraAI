@@ -15,6 +15,8 @@ async def run_migrations() -> None:
     await execute("ALTER TABLE cameras ADD COLUMN IF NOT EXISTS onvif_profile_token TEXT")
     await execute("ALTER TABLE cameras ADD COLUMN IF NOT EXISTS ai_enabled BOOLEAN NOT NULL DEFAULT FALSE")
     await execute("ALTER TABLE cameras ALTER COLUMN ai_enabled SET DEFAULT FALSE")
+    await execute("ALTER TABLE persons ADD COLUMN IF NOT EXISTS email TEXT")
+    await execute("ALTER TABLE persons ADD COLUMN IF NOT EXISTS phone TEXT")
 
 
 async def seed_data() -> None:
@@ -59,6 +61,18 @@ async def seed_data() -> None:
         ("schedule.start_time", "08:00", "Daily schedule start (HH:MM, server time)"),
         ("schedule.end_time", "20:00", "Daily schedule end (HH:MM, server time)"),
         ("schedule.days", "mon,tue,wed,thu,fri,sat,sun", "Comma-separated days when detection events are recorded"),
+        ("presence.absence_seconds", "30", "Seconds a person must be out of camera view before they count as having left the zone (enables a new greeting on return)"),
+        ("detection.min_face_capture", "0.75", "Minimum face capture score (visibility x detection quality, 0-1) required to store a detection event"),
+        ("detection.require_gender_or_person", "true", "Store a detection event only when the person is recognized or a gender was estimated"),
+        ("retention.days", "0", "Auto-delete detection events (and snapshots) older than this many days (0 = keep forever)"),
+        ("voice.enabled", "false", "Speak greetings aloud in the browser on the Live Monitoring page"),
+        ("voice.greet_known", "true", "Speak greetings for recognized people"),
+        ("voice.greet_unknown", "true", "Speak sir/madam/neutral greetings for unknown people"),
+        ("voice.repeat_seconds", "60", "Minimum seconds before the same person/zone greeting is spoken again on a device"),
+        ("voice.rate", "1.0", "Voice speaking rate (0.5 - 2.0)"),
+        ("voice.volume", "1.0", "Voice volume (0.0 - 1.0)"),
+        ("voice.voice_name", "", "Preferred browser speech voice name (empty = browser default)"),
+        ("person_api.config", "", "External HR/CRM person API import configuration (JSON)"),
     ]
     for key, value, description in defaults:
         await execute(

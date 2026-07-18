@@ -1,9 +1,13 @@
+import asyncio
+import shutil
+import sys
+import tempfile
 from pathlib import Path
 from uuid import uuid4
 
 import aiofiles
 import httpx
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile
 
 from ..audit import write_audit
 from ..auth_config import SECRET_FIELDS, get_auth_config, mask_auth_config
@@ -70,7 +74,9 @@ async def ai_provider_info(user=Depends(require_roles("Admin", "Manager"))):
 
 
 def _is_secret_key(key: str) -> bool:
-    return "secret" in key or "password" in key
+    # person_api.config may embed API auth headers; expose it only through the
+    # dedicated /persons/api-config endpoints, which mask header values.
+    return "secret" in key or "password" in key or key == "person_api.config"
 
 
 @router.get("/settings")
@@ -155,6 +161,75 @@ async def update_setting(key: str, payload: SettingUpdate, user=Depends(require_
     if _is_secret_key(key) and result.get("value"):
         result["value"] = "********"
     return result
+
+
+def _find_tts_engine() -> tuple[str, ...] | None:
+    """Locate an offline TTS engine on this host.
+
+    espeak-ng ships in the backend Docker image; the macOS `say` command covers
+    local development. Returns the base command or None when neither exists.
+    """
+    for name in ("espeak-ng", "espeak"):
+        binary = shutil.which(name)
+        if binary:
+            return (binary,)
+    if sys.platform == "darwin" and shutil.which("say"):
+        return ("say",)
+    return None
+
+
+def _synthesize_speech_sync(text: str, rate: float, volume: float) -> bytes | None:
+    import subprocess
+
+    engine = _find_tts_engine()
+    if engine is None:
+        return None
+    rate = min(2.0, max(0.5, rate))
+    volume = min(1.0, max(0.0, volume))
+    if engine[0].endswith("say"):
+        # macOS: `say` writes little-endian PCM WAVE when asked for .wav output.
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+            tmp_path = Path(tmp.name)
+        try:
+            subprocess.run(
+                [engine[0], "-o", str(tmp_path), "--data-format=LEI16@22050", "-r", str(int(175 * rate)), text],
+                check=True,
+                timeout=15,
+                capture_output=True,
+            )
+            return tmp_path.read_bytes()
+        finally:
+            tmp_path.unlink(missing_ok=True)
+    result = subprocess.run(
+        [engine[0], "--stdout", "-s", str(int(175 * rate)), "-a", str(int(volume * 190)), text],
+        check=True,
+        timeout=15,
+        capture_output=True,
+    )
+    return result.stdout
+
+
+@router.get("/tts")
+async def text_to_speech(
+    text: str = Query(min_length=1, max_length=300),
+    rate: float = Query(default=1.0, ge=0.5, le=2.0),
+    volume: float = Query(default=1.0, ge=0.0, le=1.0),
+    user=Depends(require_roles("Admin", "Manager", "Operator", "Viewer")),
+):
+    """Server-generated WAV speech for the voice greeting feature.
+
+    Browsers cannot route the Web Speech API to a specific audio output device,
+    so the frontend fetches this audio and plays it through an <audio> element
+    with setSinkId() when a device is selected. 503 = no engine on this host;
+    the frontend then falls back to browser speech on the default device.
+    """
+    try:
+        wav = await asyncio.to_thread(_synthesize_speech_sync, text, rate, volume)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Speech synthesis failed: {exc}") from exc
+    if wav is None:
+        raise HTTPException(status_code=503, detail="No TTS engine available on the server")
+    return Response(content=wav, media_type="audio/wav", headers={"Cache-Control": "no-store"})
 
 
 @router.get("/greeting-templates")

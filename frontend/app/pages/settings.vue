@@ -17,14 +17,106 @@
     <div v-show="activeTab === 'general'" class="settings-grid">
       <div class="card">
         <h2 class="card-title">AI Recognition</h2>
-        <div v-for="setting in aiSettings" :key="setting.key" class="setting-row">
-          <label class="label">{{ setting.key }}</label>
-          <div style="display: flex; gap: 0.5rem;">
-            <input v-model="setting.value" class="input" />
-            <button class="btn secondary" @click="saveSetting(setting)">Save</button>
-          </div>
-          <small class="hint">{{ setting.description }}</small>
+        <div class="setting-row">
+          <label class="label">Recognition threshold: {{ Number(generalForm.recognition_threshold).toFixed(2) }}</label>
+          <input v-model.number="generalForm.recognition_threshold" type="range" min="0.2" max="0.9" step="0.01" class="range-input" />
+          <small class="hint">Minimum cosine similarity to accept a face match. Higher = stricter (fewer false matches, more misses).</small>
         </div>
+        <div class="setting-row">
+          <label class="label">Gender confidence: {{ Number(generalForm.gender_min_confidence).toFixed(2) }}</label>
+          <input v-model.number="generalForm.gender_min_confidence" type="range" min="0.3" max="0.95" step="0.01" class="range-input" />
+          <small class="hint">Minimum confidence before greeting an unknown person as sir/madam instead of the neutral greeting.</small>
+        </div>
+        <div class="setting-row">
+          <label class="label">Greeting cooldown (seconds)</label>
+          <input v-model.number="generalForm.greeting_cooldown_seconds" type="number" min="0" class="input" style="max-width: 140px;" />
+          <small class="hint">Minimum time before the same person can trigger a new greeting event.</small>
+        </div>
+        <div class="setting-row">
+          <label class="label">Left-the-zone time (seconds)</label>
+          <input v-model.number="generalForm.presence_absence_seconds" type="number" min="5" class="input" style="max-width: 140px;" />
+          <small class="hint">
+            A person is greeted once per visit. While they stay in front of a camera they are tracked and never
+            re-greeted; only after being out of view this long do they count as having left, so a later return
+            (past the cooldown) greets them again. Prevents repeated announcements for someone standing in the zone.
+          </small>
+        </div>
+        <button class="btn" :disabled="savingGeneral" @click="saveGeneral">{{ savingGeneral ? 'Saving...' : 'Save Recognition Settings' }}</button>
+        <p v-if="generalMessage" class="notice" style="margin-top: 0.75rem;">{{ generalMessage }}</p>
+      </div>
+
+      <div class="card">
+        <h2 class="card-title">Detection History Storage</h2>
+        <p class="section-text">Minimum criteria before a detection is saved to history. Below-criteria faces are still tracked and greeted live, but not stored.</p>
+        <div class="setting-row">
+          <label class="label">Minimum face capture: {{ Math.round(generalForm.min_face_capture * 100) }}%</label>
+          <input v-model.number="generalForm.min_face_capture" type="range" min="0" max="1" step="0.05" class="range-input" />
+          <small class="hint">How much of the face must be captured (visibility inside the frame x detection quality). Default 75%.</small>
+        </div>
+        <label class="checkbox-label">
+          <input v-model="generalForm.require_gender_or_person" type="checkbox" />
+          Require the person to be recognized OR a gender to be estimated
+        </label>
+        <small class="hint" style="margin-bottom: 0.85rem;">When on, anonymous faces with no recognition result and no confident gender estimate are not stored.</small>
+        <div class="setting-row">
+          <label class="label">Auto-delete history after (days)</label>
+          <input v-model.number="generalForm.retention_days" type="number" min="0" class="input" style="max-width: 140px;" />
+          <small class="hint">Detection events and snapshots older than this are deleted automatically. 0 = keep forever.</small>
+        </div>
+        <button class="btn" :disabled="savingGeneral" @click="saveGeneral">{{ savingGeneral ? 'Saving...' : 'Save Storage Settings' }}</button>
+      </div>
+
+      <div class="card">
+        <h2 class="card-title">Voice Greeting (AI Speak)</h2>
+        <p class="section-text">
+          Speaks greetings aloud ("Hello sir", "Welcome back, ...") on the Live Monitoring page of the device
+          playing audio - keep that page open on the machine connected to the speaker.
+        </p>
+        <label class="checkbox-label"><input v-model="voiceForm.enabled" type="checkbox" /> Enable voice greeting</label>
+        <label class="checkbox-label"><input v-model="voiceForm.greet_known" type="checkbox" /> Speak for recognized people</label>
+        <label class="checkbox-label"><input v-model="voiceForm.greet_unknown" type="checkbox" /> Speak for unknown people (sir/madam/neutral)</label>
+        <div class="setting-row" style="margin-top: 0.5rem;">
+          <label class="label">Do not repeat the same greeting within (seconds)</label>
+          <input v-model.number="voiceForm.repeat_seconds" type="number" min="5" class="input" style="max-width: 140px;" />
+          <small class="hint">Extra per-device guard on top of the zone tracking above, so refreshes/reconnects stay quiet.</small>
+        </div>
+        <div class="setting-row">
+          <label class="label">Audio output device (this device only)</label>
+          <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+            <select v-model="selectedOutputId" style="flex: 1; min-width: 180px;">
+              <option value="">System default output</option>
+              <option v-for="device in outputDevices" :key="device.deviceId" :value="device.deviceId">{{ device.label }}</option>
+            </select>
+            <button class="btn sm secondary" type="button" @click="refreshOutputDevices">Detect devices</button>
+          </div>
+          <small class="hint">
+            Choose which connected speaker plays the AI voice. Saved per browser/device.
+            <template v-if="!sinkSupported">Your browser does not support output routing - the system default is used.</template>
+          </small>
+        </div>
+        <div class="setting-row">
+          <label class="label">Voice</label>
+          <select v-model="voiceForm.voice_name">
+            <option value="">Browser default voice</option>
+            <option v-for="voice in browserVoices" :key="voice.name" :value="voice.name">{{ voice.name }} ({{ voice.lang }})</option>
+          </select>
+          <small class="hint">Used for browser speech. When a specific output device is selected, the server voice is used instead so audio can be routed.</small>
+        </div>
+        <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
+          <div class="setting-row" style="flex: 1; min-width: 150px;">
+            <label class="label">Rate: {{ Number(voiceForm.rate).toFixed(2) }}</label>
+            <input v-model.number="voiceForm.rate" type="range" min="0.5" max="2" step="0.05" class="range-input" />
+          </div>
+          <div class="setting-row" style="flex: 1; min-width: 150px;">
+            <label class="label">Volume: {{ Math.round(voiceForm.volume * 100) }}%</label>
+            <input v-model.number="voiceForm.volume" type="range" min="0" max="1" step="0.05" class="range-input" />
+          </div>
+        </div>
+        <div class="btn-row">
+          <button class="btn" :disabled="savingVoice" @click="saveVoice">{{ savingVoice ? 'Saving...' : 'Save Voice Settings' }}</button>
+          <button class="btn secondary" type="button" @click="testVoice">Test Voice</button>
+        </div>
+        <p v-if="voiceMessage" class="notice" style="margin-top: 0.75rem;">{{ voiceMessage }}</p>
       </div>
 
       <div class="card">
@@ -35,6 +127,19 @@
           <div><label class="label">Female Unknown</label><input v-model="template.female_template" class="input" /></div>
           <div><label class="label">Neutral Unknown</label><input v-model="template.neutral_template" class="input" /></div>
           <div><button class="btn secondary" @click="saveTemplate(template)">Save Template</button></div>
+        </div>
+      </div>
+
+      <div v-if="advancedSettings.length" class="card">
+        <h2 class="card-title">Advanced</h2>
+        <p class="section-text">Raw settings not covered by the cards above.</p>
+        <div v-for="setting in advancedSettings" :key="setting.key" class="setting-row">
+          <label class="label">{{ setting.key }}</label>
+          <div style="display: flex; gap: 0.5rem;">
+            <input v-model="setting.value" class="input" />
+            <button class="btn secondary" @click="saveSetting(setting)">Save</button>
+          </div>
+          <small class="hint">{{ setting.description }}</small>
         </div>
       </div>
     </div>
@@ -320,9 +425,48 @@ const savingAuth = ref('')
 const authMessage = ref('')
 const authError = ref('')
 
-const aiSettings = computed(() =>
-  settings.value.filter(s => !s.key.startsWith('appearance.') && !s.key.startsWith('schedule.') && !s.key.startsWith('auth.'))
+const GENERAL_KEYS = [
+  'recognition_threshold', 'gender_min_confidence', 'greeting_cooldown_seconds',
+  'presence.absence_seconds', 'detection.min_face_capture', 'detection.require_gender_or_person',
+  'retention.days', 'person_api.config'
+]
+const advancedSettings = computed(() =>
+  settings.value.filter(s =>
+    !s.key.startsWith('appearance.') && !s.key.startsWith('schedule.') && !s.key.startsWith('auth.')
+    && !s.key.startsWith('voice.') && !GENERAL_KEYS.includes(s.key)
+  )
 )
+
+const generalForm = reactive({
+  recognition_threshold: 0.45,
+  gender_min_confidence: 0.6,
+  greeting_cooldown_seconds: 300,
+  presence_absence_seconds: 30,
+  min_face_capture: 0.75,
+  require_gender_or_person: true,
+  retention_days: 0
+})
+const savingGeneral = ref(false)
+const generalMessage = ref('')
+
+const voiceForm = reactive({
+  enabled: false,
+  greet_known: true,
+  greet_unknown: true,
+  repeat_seconds: 60,
+  rate: 1.0,
+  volume: 1.0,
+  voice_name: ''
+})
+const savingVoice = ref(false)
+const voiceMessage = ref('')
+
+const voiceGreeter = useVoiceGreeter()
+const outputDevices = ref<Array<{ deviceId: string, label: string }>>([])
+const selectedOutputId = ref(voiceGreeter.outputDeviceId.value)
+const browserVoices = ref<SpeechSynthesisVoice[]>([])
+const sinkSupported = ref(true)
+
 const isDeepLearning = computed(() =>
   providerInfo.value.reachable && !String(providerInfo.value.provider || '').startsWith('opencv_mock')
 )
@@ -330,16 +474,35 @@ const isDeepLearning = computed(() =>
 const settingValue = (key: string, fallback: string) =>
   settings.value.find(s => s.key === key)?.value ?? fallback
 
+const parseBool = (value: string) => ['1', 'true', 'yes'].includes(value.toLowerCase())
+
 const load = async () => {
   settings.value = await apiFetch('/settings')
   templates.value = await apiFetch('/greeting-templates')
   appearanceForm.app_name = settingValue('appearance.app_name', 'KNetraAI')
   appearanceForm.primary_color = settingValue('appearance.primary_color', '#1E90FF')
   appearanceForm.secondary_color = settingValue('appearance.secondary_color', '#0f172a')
-  scheduleForm.enabled = ['1', 'true', 'yes'].includes(settingValue('schedule.enabled', 'false').toLowerCase())
+  scheduleForm.enabled = parseBool(settingValue('schedule.enabled', 'false'))
   scheduleForm.start_time = settingValue('schedule.start_time', '08:00')
   scheduleForm.end_time = settingValue('schedule.end_time', '20:00')
   scheduleForm.days = settingValue('schedule.days', allDays.join(',')).split(',').map((d: string) => d.trim()).filter(Boolean)
+
+  generalForm.recognition_threshold = Number(settingValue('recognition_threshold', '0.45'))
+  generalForm.gender_min_confidence = Number(settingValue('gender_min_confidence', '0.6'))
+  generalForm.greeting_cooldown_seconds = Number(settingValue('greeting_cooldown_seconds', '300'))
+  generalForm.presence_absence_seconds = Number(settingValue('presence.absence_seconds', '30'))
+  generalForm.min_face_capture = Number(settingValue('detection.min_face_capture', '0.75'))
+  generalForm.require_gender_or_person = parseBool(settingValue('detection.require_gender_or_person', 'true'))
+  generalForm.retention_days = Number(settingValue('retention.days', '0'))
+
+  voiceForm.enabled = parseBool(settingValue('voice.enabled', 'false'))
+  voiceForm.greet_known = parseBool(settingValue('voice.greet_known', 'true'))
+  voiceForm.greet_unknown = parseBool(settingValue('voice.greet_unknown', 'true'))
+  voiceForm.repeat_seconds = Number(settingValue('voice.repeat_seconds', '60'))
+  voiceForm.rate = Number(settingValue('voice.rate', '1'))
+  voiceForm.volume = Number(settingValue('voice.volume', '1'))
+  voiceForm.voice_name = settingValue('voice.voice_name', '')
+
   providerInfo.value = await apiFetch('/settings/ai-provider').catch(() => ({ reachable: false }))
   const authConfig = await apiFetch('/settings/auth-config').catch(() => null)
   if (authConfig) {
@@ -347,6 +510,84 @@ const load = async () => {
     Object.assign(authForm.oidc, authConfig.oidc)
     Object.assign(authForm.ldap, authConfig.ldap)
   }
+}
+
+const putSetting = (key: string, value: string | number | boolean) =>
+  apiFetch(`/settings/${key}`, { method: 'PUT', body: { value: String(value) } })
+
+const saveGeneral = async () => {
+  savingGeneral.value = true
+  generalMessage.value = ''
+  try {
+    await putSetting('recognition_threshold', generalForm.recognition_threshold)
+    await putSetting('gender_min_confidence', generalForm.gender_min_confidence)
+    await putSetting('greeting_cooldown_seconds', generalForm.greeting_cooldown_seconds)
+    await putSetting('presence.absence_seconds', generalForm.presence_absence_seconds)
+    await putSetting('detection.min_face_capture', generalForm.min_face_capture)
+    await putSetting('detection.require_gender_or_person', generalForm.require_gender_or_person)
+    await putSetting('retention.days', generalForm.retention_days)
+    generalMessage.value = 'Saved. Camera workers pick up the new values within ~30 seconds - no restart needed.'
+    await load()
+  } catch (e: any) {
+    generalMessage.value = e?.data?.detail || e.message
+  } finally {
+    savingGeneral.value = false
+  }
+}
+
+const saveVoice = async () => {
+  savingVoice.value = true
+  voiceMessage.value = ''
+  try {
+    await putSetting('voice.enabled', voiceForm.enabled)
+    await putSetting('voice.greet_known', voiceForm.greet_known)
+    await putSetting('voice.greet_unknown', voiceForm.greet_unknown)
+    await putSetting('voice.repeat_seconds', voiceForm.repeat_seconds)
+    await putSetting('voice.rate', voiceForm.rate)
+    await putSetting('voice.volume', voiceForm.volume)
+    await putSetting('voice.voice_name', voiceForm.voice_name)
+    const device = outputDevices.value.find(d => d.deviceId === selectedOutputId.value)
+    voiceGreeter.setOutputDevice(selectedOutputId.value, device?.label || '')
+    voiceMessage.value = 'Voice settings saved. The Live Monitoring page uses them immediately.'
+    await load()
+  } catch (e: any) {
+    voiceMessage.value = e?.data?.detail || e.message
+  } finally {
+    savingVoice.value = false
+  }
+}
+
+const refreshOutputDevices = async () => {
+  outputDevices.value = await voiceGreeter.listOutputDevices()
+  sinkSupported.value = voiceGreeter.sinkRoutingSupported()
+  if (selectedOutputId.value && !outputDevices.value.some(d => d.deviceId === selectedOutputId.value)) {
+    // Previously chosen device is gone (unplugged); fall back to default.
+    selectedOutputId.value = ''
+  }
+}
+
+const loadBrowserVoices = () => {
+  if (!('speechSynthesis' in window)) return
+  browserVoices.value = window.speechSynthesis.getVoices()
+  if (!browserVoices.value.length) {
+    window.speechSynthesis.addEventListener('voiceschanged', () => {
+      browserVoices.value = window.speechSynthesis.getVoices()
+    }, { once: true })
+  }
+}
+
+const testVoice = async () => {
+  const device = outputDevices.value.find(d => d.deviceId === selectedOutputId.value)
+  voiceGreeter.setOutputDevice(selectedOutputId.value, device?.label || '')
+  await voiceGreeter.speakNow('Hello sir, welcome. This is a voice test.', {
+    enabled: true,
+    greetKnown: true,
+    greetUnknown: true,
+    repeatSeconds: 0,
+    rate: voiceForm.rate,
+    volume: voiceForm.volume,
+    voiceName: voiceForm.voice_name
+  })
 }
 
 const saveSetting = async (setting: any) => { await apiFetch(`/settings/${setting.key}`, { method: 'PUT', body: { value: setting.value } }); await load() }
@@ -430,7 +671,14 @@ const saveAuth = async (section: 'local' | 'oidc' | 'ldap') => {
   }
 }
 
-onMounted(load)
+onMounted(() => {
+  load()
+  loadBrowserVoices()
+  refreshOutputDevices().catch(() => {})
+  if (import.meta.client && navigator.mediaDevices?.addEventListener) {
+    navigator.mediaDevices.addEventListener('devicechange', () => refreshOutputDevices().catch(() => {}))
+  }
+})
 </script>
 
 <style scoped>
@@ -499,6 +747,11 @@ onMounted(load)
   border-radius: 0.5rem;
   background: white;
   cursor: pointer;
+}
+
+.range-input {
+  width: 100%;
+  accent-color: var(--primary);
 }
 
 .section-text {

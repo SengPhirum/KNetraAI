@@ -69,6 +69,8 @@ CREATE TABLE IF NOT EXISTS persons (
     customer_id TEXT,
     customer_type TEXT,
     vip_flag BOOLEAN NOT NULL DEFAULT FALSE,
+    email TEXT,
+    phone TEXT,
     consent_at TIMESTAMPTZ,
     notes TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),

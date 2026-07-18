@@ -42,7 +42,12 @@ async def health():
 
 @app.post("/embeddings/from-path", response_model=EmbeddingResponse, dependencies=[Depends(verify_internal_key)])
 async def embedding_from_path(payload: EmbeddingFromPathRequest):
-    result = await asyncio.to_thread(provider.embed_image, payload.path)
+    try:
+        result = await asyncio.to_thread(provider.embed_image, payload.path)
+    except ValueError as exc:
+        # e.g. "No face found in image" / unreadable file - a client-data problem,
+        # not a server fault; surface the reason so the enrollment UI can show it.
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {
         "embedding": result.embedding,
         "model_version": result.model_version,

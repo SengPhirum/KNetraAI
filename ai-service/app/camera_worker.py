@@ -93,7 +93,11 @@ class CameraWorker:
         self.ai_enabled = camera.ai_enabled
         self.status = "stopped"
         self.last_error: str | None = None
-        self.last_greeting_at: dict[str, float] = {}
+        # Per-person presence sessions: tracks who is currently in this camera's
+        # zone so a person is greeted once per visit instead of on a fixed timer.
+        # key -> {"last_seen": t, "greeted_at": t, "announced": bool}
+        self.presence: dict[str, dict[str, Any]] = {}
+        self._presence_pruned_at = 0.0
         self.latest_jpeg: bytes | None = None
         self.latest_faces: list[dict[str, Any]] = []
         self.frame_version = 0
@@ -306,13 +310,16 @@ class CameraWorker:
                 b"Content-Length: " + str(len(jpeg)).encode() + b"\r\n\r\n" + jpeg + b"\r\n"
             )
 
+    def _gender_min_confidence(self) -> float:
+        return float(self.backend.cached_runtime_settings.get("gender_min_confidence", settings.gender_min_confidence))
+
     def _face_overlay(self, face: FaceResult, recognition: dict[str, Any]) -> dict[str, Any]:
         person_type = recognition.get("person_type") if recognition.get("known") else None
         detection_kind = face.metadata.get("detection_kind", "face")
         gender = (
             face.gender
             if face.gender in ("male", "female")
-            and (face.gender_confidence or 0.0) >= settings.gender_min_confidence
+            and (face.gender_confidence or 0.0) >= self._gender_min_confidence()
             else None
         )
         return {
@@ -325,7 +332,24 @@ class CameraWorker:
             "detection_kind": detection_kind,
         }
 
+    @staticmethod
+    def _face_capture_score(face: FaceResult) -> float:
+        """Estimated fraction of the face captured: bbox visibility inside the
+        frame x detection quality (det score >= 0.8 counts as full quality)."""
+        coverage = float(face.metadata.get("coverage", 1.0))
+        quality = min(1.0, float(face.confidence or 0.0) / 0.8)
+        return round(coverage * quality, 4)
+
+    def _prune_presence(self, now: float, absence_seconds: float) -> None:
+        if now - self._presence_pruned_at < 60:
+            return
+        self._presence_pruned_at = now
+        expiry = max(3600.0, absence_seconds * 4)
+        for key in [k for k, s in self.presence.items() if now - s["last_seen"] > expiry]:
+            self.presence.pop(key, None)
+
     async def _handle_face(self, frame, face: FaceResult, recognition: dict[str, Any]) -> None:
+        runtime = await self.backend.runtime_settings()
         known = bool(recognition.get("known"))
         person_id = recognition.get("person_id") if known else None
         person_type = recognition.get("person_type") if known else "unknown"
@@ -333,17 +357,40 @@ class CameraWorker:
         gender_estimate = (
             face.gender
             if face.gender in ("male", "female")
-            and (face.gender_confidence or 0.0) >= settings.gender_min_confidence
+            and (face.gender_confidence or 0.0) >= float(runtime["gender_min_confidence"])
             else None
         )
-        cooldown_key = f"person:{person_id}" if person_id else f"unknown:{self.camera.id}:{gender_estimate or 'unknown'}"
+        presence_key = f"person:{person_id}" if person_id else f"unknown:{self.camera.id}:{gender_estimate or 'unknown'}"
         now = monotonic()
-        last = self.last_greeting_at.get(cooldown_key, 0.0)
-        if now - last < settings.greeting_cooldown_seconds:
-            return
-        self.last_greeting_at[cooldown_key] = now
+        absence_seconds = float(runtime["presence_absence_seconds"])
+        cooldown_seconds = float(runtime["greeting_cooldown_seconds"])
+        self._prune_presence(now, absence_seconds)
 
-        greeting = self._build_greeting(recognition, face)
+        state = self.presence.get(presence_key)
+        if state is None or now - state["last_seen"] >= absence_seconds:
+            # New visit: they just arrived, or left the zone and came back.
+            state = {"greeted_at": state["greeted_at"] if state else None, "announced": False, "last_seen": now}
+        else:
+            state["last_seen"] = now
+        self.presence[presence_key] = state
+
+        if state["announced"]:
+            return  # Already greeted this visit - stay quiet while they remain in the zone.
+        if state["greeted_at"] is not None and now - state["greeted_at"] < cooldown_seconds:
+            return  # They returned too soon after the last greeting.
+
+        # Storage quality gate (the backend enforces the same rules; checking here
+        # too avoids writing snapshots to disk for events the backend would reject).
+        capture_score = self._face_capture_score(face)
+        if capture_score < float(runtime["min_face_capture"]):
+            return  # Leave announced=False so a better frame this visit can still greet.
+        if bool(runtime["require_gender_or_person"]) and not known and gender_estimate is None:
+            return
+
+        state["announced"] = True
+        state["greeted_at"] = now
+
+        greeting = self._build_greeting(recognition, face, float(runtime["gender_min_confidence"]))
         snapshot_rel = self._save_snapshot(frame)
         payload = {
             "camera_id": self.camera.id,
@@ -354,16 +401,18 @@ class CameraWorker:
             "gender_confidence": face.gender_confidence if gender_estimate else None,
             "greeting": greeting,
             "snapshot_path": snapshot_rel,
+            "face_capture_score": capture_score,
             "raw": {
                 "bbox": face.bbox,
                 "recognition": recognition,
                 "face_confidence": face.confidence,
+                "face_coverage": face.metadata.get("coverage"),
                 "provider": self.provider.model_version,
             },
         }
         await self.backend.create_detection_event(payload)
 
-    def _build_greeting(self, recognition: dict[str, Any], face: FaceResult) -> str:
+    def _build_greeting(self, recognition: dict[str, Any], face: FaceResult, gender_min_confidence: float) -> str:
         hour = datetime.now().hour
         if hour < 12:
             prefix = "Good morning"
@@ -375,7 +424,7 @@ class CameraWorker:
         if recognition.get("known"):
             return f"{prefix}, {recognition.get('full_name')}"
 
-        if face.gender and (face.gender_confidence or 0.0) >= settings.gender_min_confidence:
+        if face.gender and (face.gender_confidence or 0.0) >= gender_min_confidence:
             if face.gender == "male":
                 return "Hello sir"
             if face.gender == "female":

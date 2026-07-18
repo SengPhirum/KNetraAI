@@ -170,13 +170,18 @@ class InsightFaceProvider:
             max(0, min(frame_w - 1, x2)),
             max(0, min(frame_h - 1, y2)),
         ]
+        # Fraction of the raw detection box that lies inside the frame: < 1.0 means
+        # the face is cut off by a frame edge (partially captured face).
+        raw_area = max(0.0, float(x2 - x1)) * max(0.0, float(y2 - y1))
+        clipped_area = max(0.0, float(bbox[2] - bbox[0])) * max(0.0, float(bbox[3] - bbox[1]))
+        coverage = (clipped_area / raw_area) if raw_area > 0 else 0.0
         return FaceResult(
             bbox=bbox,
             confidence=float(getattr(face, "det_score", 0.0)),
             embedding=embedding,
             gender=gender,
             gender_confidence=gender_confidence,
-            metadata={"provider": self.model_version, "detection_kind": "face"},
+            metadata={"provider": self.model_version, "detection_kind": "face", "coverage": round(coverage, 4)},
         )
 
     def _is_valid_bbox(self, bbox: list[int], score: float, frame_shape) -> bool:

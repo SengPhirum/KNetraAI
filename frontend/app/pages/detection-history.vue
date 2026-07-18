@@ -5,7 +5,18 @@
         <h1 class="page-title">Detection History</h1>
         <p class="page-subtitle">Recent walk-in detection events with snapshots and recognition results.</p>
       </div>
+      <div v-if="isAdmin" class="btn-row">
+        <button class="btn secondary" type="button" :disabled="!selectedIds.length || deleting" @click="deleteSelected">
+          Delete Selected ({{ selectedIds.length }})
+        </button>
+        <button class="btn danger" type="button" :disabled="deleting" @click="clearFiltered">
+          {{ deleting ? 'Deleting...' : 'Clear All (filtered)' }}
+        </button>
+      </div>
     </div>
+
+    <p v-if="error" class="error">{{ error }}</p>
+    <p v-if="message" class="notice">{{ message }}</p>
 
     <section class="card filters-card">
       <div class="form-grid">
@@ -54,10 +65,20 @@
 
     <div class="table-wrap">
       <table class="table">
-        <thead><tr><th>Time</th><th>Snapshot</th><th>Camera</th><th>Person</th><th>Type</th><th>Greeting</th><th>Gender</th><th>Confidence</th></tr></thead>
+        <thead>
+          <tr>
+            <th v-if="isAdmin" style="width: 2rem;">
+              <input type="checkbox" :checked="allSelected" @change="toggleSelectAll" />
+            </th>
+            <th>Time</th><th>Snapshot</th><th>Camera</th><th>Person</th><th>Type</th><th>Greeting</th><th>Gender</th><th>Confidence</th>
+          </tr>
+        </thead>
         <tbody>
-          <tr v-if="!events.length"><td colspan="8" class="empty-row">No detection events recorded yet.</td></tr>
+          <tr v-if="!events.length"><td :colspan="isAdmin ? 9 : 8" class="empty-row">No detection events recorded yet.</td></tr>
           <tr v-for="event in events" :key="event.id">
+            <td v-if="isAdmin">
+              <input type="checkbox" :checked="selectedIds.includes(event.id)" @change="toggleSelect(event.id)" />
+            </td>
             <td style="white-space: nowrap;">{{ formatDate(event.detected_at) }}</td>
             <td>
               <button v-if="event.snapshot_path" class="snapshot-thumb" type="button" @click="selectedEvent = event">
@@ -82,9 +103,14 @@
 
 <script setup lang="ts">
 const { apiFetch, apiBaseUrl } = useApi()
+const { isAdmin } = useCurrentUser()
 const events = ref<any[]>([])
 const cameras = ref<any[]>([])
 const selectedEvent = ref<any | null>(null)
+const selectedIds = ref<string[]>([])
+const deleting = ref(false)
+const error = ref('')
+const message = ref('')
 const filters = reactive({
   camera_id: '',
   person_type: '',
@@ -110,7 +136,9 @@ const query = () => {
 }
 
 const load = async () => {
+  error.value = ''
   events.value = await apiFetch(`/detection-events?${query()}`)
+  selectedIds.value = []
 }
 
 const resetFilters = async () => {
@@ -124,6 +152,62 @@ const resetFilters = async () => {
     limit: '100'
   })
   await load()
+}
+
+const allSelected = computed(() => events.value.length > 0 && selectedIds.value.length === events.value.length)
+
+const toggleSelectAll = () => {
+  selectedIds.value = allSelected.value ? [] : events.value.map(e => e.id)
+}
+
+const toggleSelect = (id: string) => {
+  selectedIds.value = selectedIds.value.includes(id)
+    ? selectedIds.value.filter(v => v !== id)
+    : [...selectedIds.value, id]
+}
+
+const deleteSelected = async () => {
+  if (!selectedIds.value.length) return
+  if (!confirm(`Delete ${selectedIds.value.length} detection event(s) and their snapshots? This cannot be undone.`)) return
+  deleting.value = true
+  error.value = ''
+  message.value = ''
+  try {
+    const result: any = await apiFetch('/detection-events/clear', {
+      method: 'POST',
+      body: { event_ids: selectedIds.value }
+    })
+    message.value = `Deleted ${result.deleted} event(s).`
+    await load()
+  } catch (e: any) {
+    error.value = e?.data?.detail || e.message
+  } finally {
+    deleting.value = false
+  }
+}
+
+const clearFiltered = async () => {
+  const scope = (filters.camera_id || filters.person_type || filters.date_from || filters.date_to)
+    ? 'all events matching the current camera/type/date filters'
+    : 'ALL detection history'
+  if (!confirm(`Delete ${scope} from the server (including snapshots)? This cannot be undone.`)) return
+  deleting.value = true
+  error.value = ''
+  message.value = ''
+  try {
+    const body: any = {}
+    if (filters.camera_id) body.camera_id = filters.camera_id
+    if (filters.person_type) body.person_type = filters.person_type
+    if (filters.date_from) body.date_from = filters.date_from
+    if (filters.date_to) body.date_to = filters.date_to
+    const result: any = await apiFetch('/detection-events/clear', { method: 'POST', body })
+    message.value = `Deleted ${result.deleted} event(s) and ${result.snapshots_removed} snapshot(s).`
+    await load()
+  } catch (e: any) {
+    error.value = e?.data?.detail || e.message
+  } finally {
+    deleting.value = false
+  }
 }
 
 onMounted(async () => {
