@@ -52,11 +52,13 @@ class EventBus:
     def remove(self, queue: asyncio.Queue) -> None:
         self.queues.discard(queue)
 
-    async def publish(self, event: dict) -> None:
+    async def publish(self, event: dict, kind: str = "detection") -> None:
+        """Fan out an SSE event; ``kind`` becomes the SSE event name
+        (detection, attendance, ...)."""
         stale: list[asyncio.Queue] = []
         for queue in list(self.queues):
             try:
-                queue.put_nowait(event)
+                queue.put_nowait({"kind": kind, "data": event})
             except asyncio.QueueFull:
                 stale.append(queue)
         for queue in stale:
@@ -246,8 +248,8 @@ async def stream_events(user=Depends(get_sse_user)):
             yield "event: connected\ndata: {}\n\n"
             while True:
                 try:
-                    event = await asyncio.wait_for(queue.get(), timeout=15)
-                    yield f"event: detection\ndata: {json.dumps(event)}\n\n"
+                    item = await asyncio.wait_for(queue.get(), timeout=15)
+                    yield f"event: {item['kind']}\ndata: {json.dumps(item['data'])}\n\n"
                 except asyncio.TimeoutError:
                     yield f": ping {datetime.now(timezone.utc).isoformat()}\n\n"
         finally:
@@ -336,10 +338,12 @@ async def create_detection_event(payload: DetectionEventCreate):
     skip_reason = await meets_storage_criteria(payload)
     if skip_reason:
         return {"skipped": skip_reason}
+    camera_attendance_role: str | None = None
     if payload.camera_id:
-        camera = await fetchrow("SELECT id FROM cameras WHERE id = $1::uuid", payload.camera_id)
+        camera = await fetchrow("SELECT id, attendance_role FROM cameras WHERE id = $1::uuid", payload.camera_id)
         if camera is None:
             return {"skipped": "camera_not_found"}
+        camera_attendance_role = camera["attendance_role"]
     row = await fetchrow(
         """
         INSERT INTO detection_events (
@@ -360,6 +364,17 @@ async def create_detection_event(payload: DetectionEventCreate):
     )
     event = await get_event(str(row["id"]))
     await event_bus.publish(event)
+
+    # Attendance mode: recognized staff on an entry/exit camera triggers the
+    # missed scan-in/out check (local import avoids a circular module import).
+    if payload.person_id and camera_attendance_role not in (None, "none"):
+        from .attendance import check_attendance_on_detection
+
+        alert = await check_attendance_on_detection(
+            payload.person_id, payload.camera_id, camera_attendance_role, publish=event_bus.publish
+        )
+        if alert:
+            event["attendance_alert"] = alert
     return event
 
 

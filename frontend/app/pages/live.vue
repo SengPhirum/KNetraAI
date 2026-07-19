@@ -141,6 +141,28 @@
       </template>
     </div>
 
+    <section v-if="attendanceEnabled" class="card" style="margin-top: 1rem;">
+      <div style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.5rem;">
+        <h2 class="card-title" style="margin: 0;">Attendance Alerts</h2>
+        <button v-if="isAdmin && attendanceAlerts.length" class="btn sm danger" type="button" :disabled="clearingAlerts" @click="clearAttendanceAlerts">
+          {{ clearingAlerts ? 'Clearing...' : 'Clear Alerts' }}
+        </button>
+      </div>
+      <p v-if="!attendanceAlerts.length" style="color: var(--text-muted); font-size: 0.88rem; margin: 0;">
+        No attendance alerts today. Staff crossing an entry/exit camera without a fingerprint scan will appear here.
+      </p>
+      <div v-else class="alert-list">
+        <div v-for="alert in attendanceAlerts" :key="alert.id" class="alert-row" :class="alert.alert_type === 'missed_check_out' ? 'alert-out' : 'alert-in'">
+          <span class="badge" :class="alert.alert_type === 'missed_check_out' ? 'danger' : 'warning'">
+            {{ alert.alert_type === 'missed_check_out' ? 'Missed scan-out' : 'Missed scan-in' }}
+          </span>
+          <strong>{{ alert.person_name || 'Staff' }}</strong>
+          <span class="alert-message">{{ alert.message }}</span>
+          <span class="alert-meta">{{ alert.camera_name || '-' }} · {{ formatDate(alert.detected_at) }}</span>
+        </div>
+      </div>
+    </section>
+
     <section class="card" style="margin-top: 1rem;">
       <div style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.5rem;">
         <h2 class="card-title" style="margin: 0;">Live Detection Events</h2>
@@ -186,7 +208,11 @@
 <script setup lang="ts">
 const { apiFetch, apiBaseUrl, token } = useApi()
 const { isAdmin, canOperate } = useCurrentUser()
+const { attendanceEnabled, attendanceVoiceAlerts, refresh: refreshAttendanceStatus } = useAttendanceStatus()
 const voiceGreeter = useVoiceGreeter()
+
+const attendanceAlerts = ref<any[]>([])
+const clearingAlerts = ref(false)
 
 const cameras = ref<any[]>([])
 const events = ref<any[]>([])
@@ -423,13 +449,44 @@ const addEvent = (event: any) => {
   voiceGreeter.speakGreeting(event, voiceSettings.value).catch(() => {})
 }
 
+const loadAttendanceAlerts = async () => {
+  if (!attendanceEnabled.value) return
+  const today = new Date().toISOString().slice(0, 10)
+  attendanceAlerts.value = await apiFetch(`/attendance/alerts?limit=30&date_from=${today}`).catch(() => [])
+}
+
+const addAttendanceAlert = (alert: any) => {
+  attendanceAlerts.value = [alert, ...attendanceAlerts.value.filter(item => item.id !== alert.id)].slice(0, 30)
+  // Attendance alerts speak with their own toggle, independent of greeting voice,
+  // and always bypass the greeting repeat-throttle (the server already dedupes).
+  if (attendanceVoiceAlerts.value && !voiceGreeter.mutedOnThisDevice.value && alert.message) {
+    voiceGreeter.speakNow(alert.message, { ...voiceSettings.value, enabled: true }).catch(() => {})
+  }
+}
+
+const clearAttendanceAlerts = async () => {
+  if (!confirm('Delete all attendance alerts from the server?')) return
+  clearingAlerts.value = true
+  try {
+    await apiFetch('/attendance/alerts/clear', { method: 'POST', body: {} })
+    attendanceAlerts.value = []
+  } catch (e: any) {
+    error.value = e?.data?.detail || e.message
+  } finally {
+    clearingAlerts.value = false
+  }
+}
+
 onMounted(async () => {
+  await refreshAttendanceStatus()
   await load()
   await loadVoiceSettings()
+  await loadAttendanceAlerts()
   refreshTimer = setInterval(load, 10000)
   if (token.value) {
     source = new EventSource(`${apiBaseUrl}/events/stream?token=${encodeURIComponent(token.value)}`)
     source.addEventListener('detection', (message: MessageEvent) => addEvent(JSON.parse(message.data)))
+    source.addEventListener('attendance', (message: MessageEvent) => addAttendanceAlert(JSON.parse(message.data)))
   }
 })
 
@@ -504,6 +561,41 @@ onBeforeUnmount(() => {
 .page-drop {
   outline: 2px dashed var(--primary);
   outline-offset: 2px;
+}
+
+.alert-list {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.alert-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  padding: 0.5rem 0.7rem;
+  border-radius: 0.5rem;
+  font-size: 0.88rem;
+  border: 1px solid var(--border);
+}
+
+.alert-row.alert-in {
+  background: color-mix(in srgb, var(--warning-soft, #fef3c7) 55%, transparent);
+}
+
+.alert-row.alert-out {
+  background: color-mix(in srgb, var(--danger-soft) 45%, transparent);
+}
+
+.alert-message {
+  color: var(--text-muted);
+}
+
+.alert-meta {
+  margin-left: auto;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  white-space: nowrap;
 }
 
 .stream-box {

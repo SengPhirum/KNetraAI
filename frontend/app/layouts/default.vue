@@ -29,9 +29,14 @@ const route = useRoute()
 const { logout } = useApi()
 const { appearance, logoSrc } = useAppearance()
 const { role } = useCurrentUser()
+const { attendanceEnabled, ensureLoaded } = useAttendanceStatus()
 const isLogin = computed(() => route.path === '/login')
 
+onMounted(() => { if (!isLogin.value) ensureLoaded() })
+watch(isLogin, (login) => { if (!login) ensureLoaded() })
+
 // roles: undefined = every signed-in role may open the page.
+// attendance: true = only shown while attendance mode is enabled.
 const allNav = [
   {
     label: 'Overview',
@@ -44,6 +49,7 @@ const allNav = [
     label: 'Operations',
     items: [
       { to: '/cameras', label: 'Camera Management', roles: ['Admin', 'Manager', 'Operator'] },
+      { to: '/fingerprints', label: 'Fingerprint Management', roles: ['Admin', 'Manager', 'Operator'], attendance: true },
       { to: '/persons', label: 'Staff/Customer Database' },
       { to: '/detection-history', label: 'Detection History' }
     ]
@@ -62,7 +68,9 @@ const nav = computed(() =>
   allNav
     .map(group => ({
       ...group,
-      items: group.items.filter((item: any) => !item.roles || item.roles.includes(role.value))
+      items: group.items.filter((item: any) =>
+        (!item.roles || item.roles.includes(role.value)) && (!item.attendance || attendanceEnabled.value)
+      )
     }))
     .filter(group => group.items.length)
 )

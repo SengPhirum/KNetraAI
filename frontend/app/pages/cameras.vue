@@ -58,6 +58,15 @@
           <label class="label" for="camera-location">Location</label>
           <input id="camera-location" v-model="form.location" class="input" />
         </div>
+        <div v-if="attendanceEnabled">
+          <label class="label" for="camera-attendance-role">Attendance door</label>
+          <select id="camera-attendance-role" v-model="form.attendance_role">
+            <option value="none">Not an attendance door</option>
+            <option value="entry">Entry door (missed scan-in alerts)</option>
+            <option value="exit">Exit door (missed scan-out alerts)</option>
+            <option value="both">Entry + exit door</option>
+          </select>
+        </div>
         <label class="checkbox-label active-toggle">
           <input v-model="form.enabled" type="checkbox" />
           <span>Active camera</span>
@@ -216,6 +225,9 @@
               </td>
               <th scope="row" class="camera-name-col">
                 <div class="primary-cell">{{ camera.name }}</div>
+                <span v-if="attendanceEnabled && camera.attendance_role && camera.attendance_role !== 'none'" class="badge warning">
+                  {{ camera.attendance_role === 'both' ? 'Entry + Exit' : camera.attendance_role === 'entry' ? 'Entry door' : 'Exit door' }}
+                </span>
                 <div v-if="camera.last_error" class="muted-cell danger-text">{{ camera.last_error }}</div>
               </th>
               <td>
@@ -320,6 +332,7 @@ type Camera = {
   source?: 'manual' | 'onvif'
   status: string
   last_error?: string | null
+  attendance_role?: string
 }
 
 type ThumbnailState = {
@@ -333,13 +346,14 @@ type SnapshotResponse = { ok: boolean; thumbnail?: string; error?: string; sourc
 
 const { apiFetch } = useApi()
 const { isAdmin, canManage } = useCurrentUser()
+const { attendanceEnabled, ensureLoaded: ensureAttendanceLoaded } = useAttendanceStatus()
 const cameras = ref<Camera[]>([])
 const error = ref('')
 const showHelp = ref(false)
 const loading = ref(false)
 const saving = ref(false)
 const cameraFilter = ref<'active' | 'all'>('active')
-const form = reactive({ name: '', branch: '', location: '', rtsp_url: '', enabled: true })
+const form = reactive({ name: '', branch: '', location: '', rtsp_url: '', enabled: true, attendance_role: 'none' })
 const editingId = ref<string | null>(null)
 const testing = ref(false)
 const testResult = ref<{ ok: boolean; width?: number; height?: number; error?: string } | null>(null)
@@ -420,7 +434,7 @@ const useTemplate = (url: string) => {
 const resetForm = () => {
   editingId.value = null
   testResult.value = null
-  Object.assign(form, { name: '', branch: '', location: '', rtsp_url: '', enabled: true })
+  Object.assign(form, { name: '', branch: '', location: '', rtsp_url: '', enabled: true, attendance_role: 'none' })
 }
 
 const edit = (camera: Camera) => {
@@ -432,7 +446,8 @@ const edit = (camera: Camera) => {
     branch: camera.branch || '',
     location: camera.location || '',
     rtsp_url: camera.rtsp_url || '',
-    enabled: camera.enabled !== false
+    enabled: camera.enabled !== false,
+    attendance_role: camera.attendance_role || 'none'
   })
   document.getElementById('manual-camera-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
@@ -530,7 +545,8 @@ const saveCamera = async () => {
     branch: form.branch.trim() || undefined,
     location: form.location.trim() || undefined,
     rtsp_url: form.rtsp_url.trim(),
-    enabled: form.enabled
+    enabled: form.enabled,
+    attendance_role: form.attendance_role
   }
   try {
     if (editingId.value) {
@@ -679,5 +695,8 @@ const bulkDelete = () => {
   })
 }
 
-onMounted(load)
+onMounted(() => {
+  load()
+  ensureAttendanceLoaded()
+})
 </script>

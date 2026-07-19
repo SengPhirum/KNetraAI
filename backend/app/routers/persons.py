@@ -93,8 +93,9 @@ async def _insert_person(payload: PersonCreate):
         f"""
         INSERT INTO persons (
             person_type, full_name, gender, branch, status, staff_id, department, position,
-            customer_id, customer_type, vip_flag, email, phone, consent_at, notes
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, {consent_at_expr}, $14)
+            customer_id, customer_type, vip_flag, email, phone, fp_user_id, shift_start, shift_end,
+            consent_at, notes
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, {consent_at_expr}, $17)
         RETURNING *
         """,
         payload.person_type,
@@ -110,13 +111,29 @@ async def _insert_person(payload: PersonCreate):
         payload.vip_flag,
         payload.email,
         payload.phone,
+        payload.fp_user_id,
+        payload.shift_start,
+        payload.shift_end,
         payload.notes,
     )
+
+
+async def _adopt_orphan_punches(row) -> None:
+    """Claim any earlier-synced fingerprint punches that match this staff member."""
+    if row["person_type"] != "staff":
+        return
+    from .attendance import remap_person_punches
+
+    try:
+        await remap_person_punches(str(row["id"]), row["fp_user_id"], row["staff_id"])
+    except Exception:
+        pass
 
 
 @router.post("")
 async def create_person(payload: PersonCreate, user=Depends(require_roles("Admin", "Manager", "Operator"))):
     row = await _insert_person(payload)
+    await _adopt_orphan_punches(row)
     await write_audit(user, "person.create", "person", str(row["id"]), {"person_type": payload.person_type})
     return to_jsonable(row)
 
@@ -124,7 +141,7 @@ async def create_person(payload: PersonCreate, user=Depends(require_roles("Admin
 CSV_COLUMNS = [
     "person_type", "full_name", "gender", "branch", "status", "staff_id",
     "department", "position", "customer_id", "customer_type", "vip_flag",
-    "email", "phone", "notes", "consent_confirmed",
+    "email", "phone", "fp_user_id", "shift_start", "shift_end", "notes", "consent_confirmed",
 ]
 
 _TRUTHY = {"1", "true", "yes", "y"}
@@ -163,8 +180,9 @@ async def _import_persons(items: list[dict], mode: str, user, source: str = "csv
                 UPDATE persons
                 SET full_name = $1, gender = $2, branch = $3, status = $4, department = $5,
                     position = $6, customer_type = $7, vip_flag = $8, email = $9, phone = $10,
-                    notes = $11, updated_at = now()
-                WHERE id = $12
+                    fp_user_id = COALESCE($11, fp_user_id), shift_start = COALESCE($12, shift_start),
+                    shift_end = COALESCE($13, shift_end), notes = $14, updated_at = now()
+                WHERE id = $15
                 """,
                 payload.full_name,
                 payload.gender,
@@ -176,6 +194,9 @@ async def _import_persons(items: list[dict], mode: str, user, source: str = "csv
                 payload.vip_flag,
                 payload.email,
                 payload.phone,
+                payload.fp_user_id,
+                payload.shift_start,
+                payload.shift_end,
                 payload.notes,
                 existing["id"],
             )
@@ -408,9 +429,9 @@ async def update_person(person_id: str, payload: PersonUpdate, user=Depends(requ
         UPDATE persons
         SET full_name = $1, gender = $2, branch = $3, status = $4, staff_id = $5,
             department = $6, position = $7, customer_id = $8, customer_type = $9,
-            vip_flag = $10, email = $11, phone = $12, consent_at = $13,
-            notes = $14, updated_at = now()
-        WHERE id = $15::uuid
+            vip_flag = $10, email = $11, phone = $12, fp_user_id = $13, shift_start = $14,
+            shift_end = $15, consent_at = $16, notes = $17, updated_at = now()
+        WHERE id = $18::uuid
         RETURNING *
         """,
         merged["full_name"],
@@ -425,10 +446,14 @@ async def update_person(person_id: str, payload: PersonUpdate, user=Depends(requ
         merged["vip_flag"],
         merged["email"],
         merged["phone"],
+        merged["fp_user_id"],
+        merged["shift_start"],
+        merged["shift_end"],
         consent_value,
         merged["notes"],
         person_id,
     )
+    await _adopt_orphan_punches(row)
     await write_audit(user, "person.update", "person", person_id)
     return to_jsonable(row)
 
@@ -483,6 +508,7 @@ async def upload_person_image(
     embedding_error = None
     model_version = None
     quality_score = None
+    faces_found = None
     try:
         async with httpx.AsyncClient(timeout=60) as client:
             response = await client.post(
@@ -495,6 +521,7 @@ async def upload_person_image(
         embedding = data["embedding"]
         model_version = data.get("model_version", "unknown")
         quality_score = data.get("quality_score")
+        faces_found = (data.get("metadata") or {}).get("faces_found")
         await execute(
             """
             INSERT INTO face_embeddings (person_id, person_image_id, embedding, model_version)
@@ -530,6 +557,7 @@ async def upload_person_image(
             "embedding_error": embedding_error,
             "model_version": model_version,
             "quality_score": quality_score,
+            "faces_found": faces_found,
         }
     )
     return result

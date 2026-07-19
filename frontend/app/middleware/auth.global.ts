@@ -3,6 +3,7 @@
 // their role. Roles: Viewer < Operator < Manager < Admin.
 const ROUTE_MIN_ROLE: Record<string, string[]> = {
   '/cameras': ['Admin', 'Manager', 'Operator'],
+  '/fingerprints': ['Admin', 'Manager', 'Operator'],
   '/settings': ['Admin'],
   '/users': ['Admin', 'Manager'],
   '/audit-logs': ['Admin', 'Manager']

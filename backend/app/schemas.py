@@ -50,6 +50,7 @@ class CameraCreate(BaseModel):
     source: Literal["manual", "onvif"] = "manual"
     onvif_host: str | None = None
     onvif_profile_token: str | None = None
+    attendance_role: Literal["none", "entry", "exit", "both"] = "none"
 
 
 class CameraUpdate(BaseModel):
@@ -59,6 +60,7 @@ class CameraUpdate(BaseModel):
     rtsp_url: str | None = None
     enabled: bool | None = None
     ai_enabled: bool | None = None
+    attendance_role: Literal["none", "entry", "exit", "both"] | None = None
 
 
 class CameraDiscoverRequest(BaseModel):
@@ -95,6 +97,9 @@ class PersonCreate(BaseModel):
     vip_flag: bool = False
     email: str | None = None
     phone: str | None = None
+    fp_user_id: str | None = None
+    shift_start: str | None = None
+    shift_end: str | None = None
     notes: str | None = None
     consent_confirmed: bool = False
 
@@ -112,6 +117,9 @@ class PersonUpdate(BaseModel):
     vip_flag: bool | None = None
     email: str | None = None
     phone: str | None = None
+    fp_user_id: str | None = None
+    shift_start: str | None = None
+    shift_end: str | None = None
     notes: str | None = None
     consent_confirmed: bool | None = None
 
@@ -219,6 +227,66 @@ class PersonApiConfig(BaseModel):
 class PersonApiSyncRequest(BaseModel):
     preview: bool = False
     limit: int = Field(default=0, ge=0, le=10000)  # 0 = no limit
+
+
+class FpDeviceCreate(BaseModel):
+    name: str
+    # 'zk' = direct device polling; 'adms_push' = device pushes to /iclock;
+    # 'biotime' = poll a ZKTeco BioTime server REST API with username/password.
+    protocol: Literal["zk", "adms_push", "biotime"] = "zk"
+    host: str = ""
+    port: int = Field(default=4370, ge=1, le=65535)
+    comm_key: str = "0"
+    use_udp: bool = False
+    api_url: str = ""
+    api_username: str = ""
+    api_password: str = ""
+    device_serial: str | None = None
+    branch: str | None = None
+    location: str | None = None
+    direction: Literal["in", "out", "both"] = "both"
+    enabled: bool = True
+
+
+class FpDeviceUpdate(BaseModel):
+    name: str | None = None
+    protocol: Literal["zk", "adms_push", "biotime"] | None = None
+    host: str | None = None
+    port: int | None = Field(default=None, ge=1, le=65535)
+    comm_key: str | None = None
+    use_udp: bool | None = None
+    api_url: str | None = None
+    api_username: str | None = None
+    # Empty string keeps the stored password.
+    api_password: str | None = None
+    device_serial: str | None = None
+    branch: str | None = None
+    location: str | None = None
+    direction: Literal["in", "out", "both"] | None = None
+    enabled: bool | None = None
+
+
+class FpDiscoverRequest(BaseModel):
+    """Sweep a /24 network for fingerprint devices listening on the ZK port."""
+
+    network_base: str  # e.g. "192.168.1"
+    port: int = Field(default=4370, ge=1, le=65535)
+
+
+class AttendancePunchIn(BaseModel):
+    device_user_id: str
+    punched_at: str  # ISO datetime; naive values use the attendance timezone
+    punch_type: Literal["in", "out", "unknown"] = "unknown"
+
+
+class AttendancePushRequest(BaseModel):
+    """Punches pushed by non-ZKTeco systems (access control middleware, etc.)."""
+
+    records: list[AttendancePunchIn]
+
+
+class AttendanceAlertsClearRequest(BaseModel):
+    alert_ids: list[str] | None = None  # None/empty = clear everything
 
 
 class SettingUpdate(BaseModel):

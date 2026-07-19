@@ -10,3 +10,6 @@ httpx>=0.28
 orjson>=3.11
 email-validator>=2.3
 ldap3>=2.9
+pyzk>=0.9
+# IANA timezone data for zoneinfo - python:slim images ship without /usr/share/zoneinfo.
+tzdata>=2024.1

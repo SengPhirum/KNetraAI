@@ -48,6 +48,19 @@
           <div><label class="label">Staff ID</label><input v-model="form.staff_id" class="input" placeholder="EMP-001" /></div>
           <div><label class="label">Department</label><input v-model="form.department" class="input" placeholder="Sales" /></div>
           <div><label class="label">Position</label><input v-model="form.position" class="input" placeholder="Manager" /></div>
+          <template v-if="attendanceEnabled">
+            <div>
+              <label class="label">Fingerprint ID</label>
+              <input v-model="form.fp_user_id" class="input" placeholder="User ID on FP machine" />
+              <small class="hint">Leave empty if it equals the Staff ID.</small>
+            </div>
+            <div><label class="label">Shift start</label><input v-model="form.shift_start" type="time" class="input" /></div>
+            <div>
+              <label class="label">Shift end</label>
+              <input v-model="form.shift_end" type="time" class="input" />
+              <small class="hint">Overrides the global checkout time for scan-out alerts.</small>
+            </div>
+          </template>
         </template>
 
         <!-- Customer-only fields -->
@@ -91,6 +104,7 @@
 
 <script setup lang="ts">
 const { apiFetch } = useApi()
+const { attendanceEnabled, ensureLoaded } = useAttendanceStatus()
 const error = ref('')
 const saving = ref(false)
 const customerTypeChoice = ref('')
@@ -110,9 +124,14 @@ const form = reactive<any>({
   vip_flag: false,
   email: '',
   phone: '',
+  fp_user_id: '',
+  shift_start: '',
+  shift_end: '',
   consent_confirmed: false,
   notes: ''
 })
+
+onMounted(ensureLoaded)
 
 const setType = (type: 'staff' | 'customer') => {
   form.person_type = type
@@ -128,12 +147,15 @@ const save = async (openScan: boolean) => {
       payload.staff_id = null
       payload.department = null
       payload.position = null
+      payload.fp_user_id = null
+      payload.shift_start = null
+      payload.shift_end = null
     } else {
       payload.customer_id = null
       payload.customer_type = null
       payload.vip_flag = false
     }
-    for (const key of ['branch', 'staff_id', 'department', 'position', 'customer_id', 'customer_type', 'email', 'phone', 'notes']) {
+    for (const key of ['branch', 'staff_id', 'department', 'position', 'customer_id', 'customer_type', 'email', 'phone', 'fp_user_id', 'shift_start', 'shift_end', 'notes']) {
       if (payload[key] === '') payload[key] = null
     }
     const person: any = await apiFetch('/persons', { method: 'POST', body: payload })

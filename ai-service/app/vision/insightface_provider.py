@@ -35,6 +35,7 @@ class InsightFaceProvider:
 
             from insightface.app import FaceAnalysis
 
+            self._patch_genderage_confidence()
             self._configure_model_downloader()
             providers, auto_ctx_id = resolve_onnx_providers(settings.insightface_providers)
             ctx_id = auto_ctx_id if int(settings.insightface_ctx_id) == -2 else int(settings.insightface_ctx_id)
@@ -115,6 +116,55 @@ class InsightFaceProvider:
         session_cls._knetraai_thread_patched = True
 
     @staticmethod
+    def _patch_genderage_confidence() -> None:
+        """insightface's genderage model only exposes the argmax gender class, so
+        every caller had to assume a fixed confidence. Re-run its (short) get()
+        logic with a softmax over the two gender logits and store the real
+        probability on the face, making the gender_min_confidence setting act on
+        actual model certainty. Falls back to the stock implementation on any
+        mismatch with the installed insightface version."""
+        from insightface.model_zoo import attribute as attribute_module
+
+        cls = attribute_module.Attribute
+        if getattr(cls, "_knetra_confidence_patched", False):
+            return
+        original_get = cls.get
+
+        def get_with_confidence(self, img, face):
+            if getattr(self, "taskname", "") != "genderage":
+                return original_get(self, img, face)
+            try:
+                from insightface.utils import face_align
+
+                bbox = face.bbox
+                width, height = (bbox[2] - bbox[0]), (bbox[3] - bbox[1])
+                center = (bbox[2] + bbox[0]) / 2, (bbox[3] + bbox[1]) / 2
+                scale = self.input_size[0] / (max(width, height) * 1.5)
+                aligned, _ = face_align.transform(img, center, self.input_size[0], scale, 0)
+                input_size = tuple(aligned.shape[0:2][::-1])
+                blob = cv2.dnn.blobFromImage(
+                    aligned,
+                    1.0 / self.input_std,
+                    input_size,
+                    (self.input_mean, self.input_mean, self.input_mean),
+                    swapRB=True,
+                )
+                pred = self.session.run(self.output_names, {self.input_name: blob})[0][0]
+                logits = np.asarray(pred[:2], dtype="float32")
+                exp = np.exp(logits - logits.max())
+                probs = exp / exp.sum()
+                gender = int(np.argmax(probs))
+                face["gender"] = gender
+                face["age"] = int(np.round(pred[2] * 100))
+                face["gender_confidence"] = float(probs[gender])
+                return gender, face["age"]
+            except Exception:
+                return original_get(self, img, face)
+
+        cls.get = get_with_confidence
+        cls._knetra_confidence_patched = True
+
+    @staticmethod
     def _configure_onnxruntime_logging() -> None:
         try:
             import onnxruntime as ort
@@ -154,9 +204,11 @@ class InsightFaceProvider:
         gender = None
         gender_confidence = None
         if hasattr(face, "gender"):
-            # InsightFace commonly returns 1 for male and 0 for female.
+            # InsightFace commonly returns 1 for male and 0 for female. The real
+            # softmax probability comes from _patch_genderage_confidence(); 0.80 is
+            # only the fallback when the patch could not run.
             gender = "male" if int(face.gender) == 1 else "female"
-            gender_confidence = 0.80
+            gender_confidence = float(getattr(face, "gender_confidence", 0.80) or 0.80)
         frame_h, frame_w = frame_shape[:2]
         offset_x, offset_y = offset
         x1, y1, x2, y2 = [int(round(float(v))) for v in face.bbox.tolist()]
@@ -268,7 +320,18 @@ class InsightFaceProvider:
         h, w = image.shape[:2]
         bx = face_result.bbox
         area = max(0.0, float((bx[2] - bx[0]) * (bx[3] - bx[1])))
-        quality = min(1.0, area / max(1.0, float(w * h)) * 4.0)
+
+        # Enrollment quality combines detector certainty, how much of the photo
+        # the face fills, and crop sharpness (Laplacian variance) so blurry or
+        # tiny profile pictures get a visibly low score in the UI.
+        area_score = min(1.0, area / max(1.0, float(w * h)) * 4.0)
+        det_score = min(1.0, float(face_result.confidence or 0.0) / 0.8)
+        crop = image[max(0, bx[1]):max(0, bx[3]), max(0, bx[0]):max(0, bx[2])]
+        sharpness_score = 0.0
+        if crop.size:
+            variance = float(cv2.Laplacian(cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY), cv2.CV_64F).var())
+            sharpness_score = min(1.0, variance / 250.0)
+        quality = round(0.45 * det_score + 0.30 * area_score + 0.25 * sharpness_score, 4)
         return EmbeddingResult(
             embedding=face_result.embedding,
             model_version=self.model_version,

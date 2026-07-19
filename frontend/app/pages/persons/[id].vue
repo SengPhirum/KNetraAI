@@ -29,6 +29,10 @@
             <div><dt>Staff ID</dt><dd>{{ person.staff_id || '-' }}</dd></div>
             <div><dt>Department</dt><dd>{{ person.department || '-' }}</dd></div>
             <div><dt>Position</dt><dd>{{ person.position || '-' }}</dd></div>
+            <template v-if="attendanceEnabled">
+              <div><dt>Fingerprint ID</dt><dd>{{ person.fp_user_id || person.staff_id || '-' }}</dd></div>
+              <div><dt>Shift</dt><dd>{{ person.shift_start || '-' }} → {{ person.shift_end || 'default' }}</dd></div>
+            </template>
           </template>
           <template v-else>
             <div><dt>Customer ID</dt><dd>{{ person.customer_id || '-' }}</dd></div>
@@ -55,6 +59,14 @@
             <div><label class="label">Staff ID</label><input v-model="editForm.staff_id" class="input" /></div>
             <div><label class="label">Department</label><input v-model="editForm.department" class="input" /></div>
             <div><label class="label">Position</label><input v-model="editForm.position" class="input" /></div>
+            <template v-if="attendanceEnabled">
+              <div>
+                <label class="label">Fingerprint ID</label>
+                <input v-model="editForm.fp_user_id" class="input" placeholder="User ID on FP machine" />
+              </div>
+              <div><label class="label">Shift start</label><input v-model="editForm.shift_start" type="time" class="input" /></div>
+              <div><label class="label">Shift end</label><input v-model="editForm.shift_end" type="time" class="input" /></div>
+            </template>
           </template>
           <template v-else>
             <div><label class="label">Customer ID</label><input v-model="editForm.customer_id" class="input" /></div>
@@ -123,6 +135,7 @@
 const route = useRoute()
 const { apiFetch, apiBaseUrl } = useApi()
 const { canManage, canOperate } = useCurrentUser()
+const { attendanceEnabled, ensureLoaded: ensureAttendanceLoaded } = useAttendanceStatus()
 
 const person = ref<any>(null)
 const file = ref<File | null>(null)
@@ -161,6 +174,9 @@ const startEdit = () => {
     vip_flag: Boolean(person.value.vip_flag),
     email: person.value.email || '',
     phone: person.value.phone || '',
+    fp_user_id: person.value.fp_user_id || '',
+    shift_start: person.value.shift_start || '',
+    shift_end: person.value.shift_end || '',
     notes: person.value.notes || '',
     consent_confirmed: Boolean(person.value.consent_at)
   })
@@ -173,7 +189,7 @@ const saveEdit = async () => {
   editError.value = ''
   try {
     const payload: any = { ...editForm }
-    for (const key of ['branch', 'staff_id', 'department', 'position', 'customer_id', 'customer_type', 'email', 'phone', 'notes']) {
+    for (const key of ['branch', 'staff_id', 'department', 'position', 'customer_id', 'customer_type', 'email', 'phone', 'fp_user_id', 'shift_start', 'shift_end', 'notes']) {
       if (payload[key] === '') payload[key] = null
     }
     await apiFetch(`/persons/${route.params.id}`, { method: 'PUT', body: payload })
@@ -227,6 +243,7 @@ const upload = async () => {
 }
 
 onMounted(async () => {
+  ensureAttendanceLoaded()
   await load()
   if (route.query.scan === '1') enrollTab.value = 'scan'
 })

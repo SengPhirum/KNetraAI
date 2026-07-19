@@ -333,6 +333,25 @@ class CameraWorker:
         }
 
     @staticmethod
+    def _voted_gender(state: dict[str, Any], min_confidence: float) -> tuple[str | None, float | None]:
+        """Majority gender over the visit so far: the winner needs a clear margin
+        (1.5x the opposing weight) and an average confidence above the threshold;
+        conflicting frames resolve to None (neutral greeting)."""
+        votes = state.get("gender_votes") or {}
+        weights = {g: v[0] for g, v in votes.items()}
+        counts = {g: v[1] for g, v in votes.items()}
+        if not any(counts.values()):
+            return None, None
+        winner = max(weights, key=lambda g: weights[g])
+        other = sum(w for g, w in weights.items() if g != winner)
+        if other > 0 and weights[winner] < other * 1.5:
+            return None, None  # frames disagree - stay neutral
+        average = weights[winner] / max(1, counts[winner])
+        if average < min_confidence:
+            return None, None
+        return winner, round(average, 4)
+
+    @staticmethod
     def _face_capture_score(face: FaceResult) -> float:
         """Estimated fraction of the face captured: bbox visibility inside the
         frame x detection quality (det score >= 0.8 counts as full quality)."""
@@ -354,13 +373,10 @@ class CameraWorker:
         person_id = recognition.get("person_id") if known else None
         person_type = recognition.get("person_type") if known else "unknown"
         similarity = recognition.get("similarity") if known else None
-        gender_estimate = (
-            face.gender
-            if face.gender in ("male", "female")
-            and (face.gender_confidence or 0.0) >= float(runtime["gender_min_confidence"])
-            else None
-        )
-        presence_key = f"person:{person_id}" if person_id else f"unknown:{self.camera.id}:{gender_estimate or 'unknown'}"
+        # Unknown visitors are tracked per camera zone (not per per-frame gender:
+        # a flickering gender estimate used to split one person into two sessions
+        # and greet them twice). The vote below decides the final sir/madam.
+        presence_key = f"person:{person_id}" if person_id else f"unknown:{self.camera.id}"
         now = monotonic()
         absence_seconds = float(runtime["presence_absence_seconds"])
         cooldown_seconds = float(runtime["greeting_cooldown_seconds"])
@@ -369,10 +385,23 @@ class CameraWorker:
         state = self.presence.get(presence_key)
         if state is None or now - state["last_seen"] >= absence_seconds:
             # New visit: they just arrived, or left the zone and came back.
-            state = {"greeted_at": state["greeted_at"] if state else None, "announced": False, "last_seen": now}
+            state = {
+                "greeted_at": state["greeted_at"] if state else None,
+                "announced": False,
+                "last_seen": now,
+                "gender_votes": {"male": [0.0, 0], "female": [0.0, 0]},
+            }
         else:
             state["last_seen"] = now
         self.presence[presence_key] = state
+
+        # Accumulate confidence-weighted gender votes over the visit's frames -
+        # a single frame's flip (glasses, angle) then can't mislabel the person.
+        if face.gender in ("male", "female") and face.gender_confidence:
+            vote = state.setdefault("gender_votes", {"male": [0.0, 0], "female": [0.0, 0]})[face.gender]
+            vote[0] += float(face.gender_confidence)
+            vote[1] += 1
+        gender_estimate, gender_confidence = self._voted_gender(state, float(runtime["gender_min_confidence"]))
 
         if state["announced"]:
             return  # Already greeted this visit - stay quiet while they remain in the zone.
@@ -390,7 +419,7 @@ class CameraWorker:
         state["announced"] = True
         state["greeted_at"] = now
 
-        greeting = self._build_greeting(recognition, face, float(runtime["gender_min_confidence"]))
+        greeting = self._build_greeting(recognition, gender_estimate)
         snapshot_rel = self._save_snapshot(frame)
         payload = {
             "camera_id": self.camera.id,
@@ -398,7 +427,7 @@ class CameraWorker:
             "person_type": person_type or "unknown",
             "confidence": similarity if known else face.confidence,
             "gender_estimate": gender_estimate,
-            "gender_confidence": face.gender_confidence if gender_estimate else None,
+            "gender_confidence": gender_confidence,
             "greeting": greeting,
             "snapshot_path": snapshot_rel,
             "face_capture_score": capture_score,
@@ -412,7 +441,7 @@ class CameraWorker:
         }
         await self.backend.create_detection_event(payload)
 
-    def _build_greeting(self, recognition: dict[str, Any], face: FaceResult, gender_min_confidence: float) -> str:
+    def _build_greeting(self, recognition: dict[str, Any], gender_estimate: str | None) -> str:
         hour = datetime.now().hour
         if hour < 12:
             prefix = "Good morning"
@@ -424,11 +453,10 @@ class CameraWorker:
         if recognition.get("known"):
             return f"{prefix}, {recognition.get('full_name')}"
 
-        if face.gender and (face.gender_confidence or 0.0) >= gender_min_confidence:
-            if face.gender == "male":
-                return "Hello sir"
-            if face.gender == "female":
-                return "Hello madam"
+        if gender_estimate == "male":
+            return "Hello sir"
+        if gender_estimate == "female":
+            return "Hello madam"
         return "Hello, welcome"
 
     def _save_snapshot(self, frame) -> str:

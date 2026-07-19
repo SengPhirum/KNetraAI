@@ -238,6 +238,100 @@
       </div>
     </div>
 
+    <!-- ============================ ATTENDANCE ============================ -->
+    <div v-show="activeTab === 'attendance'" class="settings-grid">
+      <div class="card">
+        <h2 class="card-title">Attendance Mode</h2>
+        <p class="section-text">
+          Optional module: pull check-in/out scans from fingerprint machines and warn staff who walk
+          past an entry/exit camera without scanning ("you missed scan in / scan out").
+        </p>
+        <label class="checkbox-label">
+          <input v-model="attendanceForm.enabled" type="checkbox" />
+          Enable attendance mode
+        </label>
+        <template v-if="attendanceForm.enabled">
+          <p class="section-text" style="margin-top: 0.5rem;">
+            Once enabled: add devices in <NuxtLink to="/fingerprints">Fingerprint Management</NuxtLink>,
+            mark door cameras as Entry/Exit in Camera Management, and make sure each staff profile has a
+            Fingerprint ID (or matching Staff ID).
+          </p>
+        </template>
+        <div class="setting-row" style="margin-top: 0.5rem;">
+          <label class="label">Business timezone (IANA name)</label>
+          <input v-model="attendanceForm.timezone" class="input" placeholder="e.g. Asia/Phnom_Penh (empty = server timezone)" />
+          <small class="hint">Fingerprint machines report local wall time; all attendance rules run in this timezone.</small>
+        </div>
+        <div class="setting-row">
+          <label class="label">Pull interval from devices (seconds)</label>
+          <input v-model.number="attendanceForm.sync_interval_seconds" type="number" min="10" class="input" style="max-width: 140px;" />
+          <small class="hint">ADMS push devices are realtime and not polled.</small>
+        </div>
+        <button class="btn" :disabled="savingAttendance" @click="saveAttendance">{{ savingAttendance ? 'Saving...' : 'Save Attendance Settings' }}</button>
+        <p v-if="attendanceMessage" class="notice" style="margin-top: 0.75rem;">{{ attendanceMessage }}</p>
+      </div>
+
+      <div class="card">
+        <h2 class="card-title">Missed Scan-In (morning)</h2>
+        <p class="section-text">
+          A staff member recognized on an <strong>entry</strong> camera inside this window with no
+          check-in scan recorded today gets the alert.
+        </p>
+        <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
+          <div>
+            <label class="label">Window start</label>
+            <input v-model="attendanceForm.checkin_window_start" type="time" class="input" />
+          </div>
+          <div>
+            <label class="label">Window end</label>
+            <input v-model="attendanceForm.checkin_window_end" type="time" class="input" />
+          </div>
+          <div>
+            <label class="label">Late after</label>
+            <input v-model="attendanceForm.checkin_deadline" type="time" class="input" />
+          </div>
+        </div>
+        <small class="hint" style="margin: 0.35rem 0 0.85rem;">"Late after" only marks scans as late in reports; it does not trigger alerts.</small>
+        <div class="setting-row">
+          <label class="label">Alert message template</label>
+          <input v-model="attendanceForm.msg_missed_in" class="input" />
+          <small class="hint">{name} is replaced with the staff member's name.</small>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2 class="card-title">Missed Scan-Out (evening)</h2>
+        <p class="section-text">
+          A staff member recognized on an <strong>exit</strong> camera at/after their shift end with no
+          check-out scan in the lookback window gets the alert. Per-staff shift end (on the profile)
+          overrides the default below.
+        </p>
+        <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
+          <div>
+            <label class="label">Default checkout time</label>
+            <input v-model="attendanceForm.checkout_time" type="time" class="input" />
+          </div>
+          <div>
+            <label class="label">Lookback (minutes)</label>
+            <input v-model.number="attendanceForm.checkout_lookback_minutes" type="number" min="10" class="input" style="max-width: 120px;" />
+          </div>
+          <div>
+            <label class="label">Repeat suppression (minutes)</label>
+            <input v-model.number="attendanceForm.alert_repeat_minutes" type="number" min="1" class="input" style="max-width: 120px;" />
+          </div>
+        </div>
+        <small class="hint" style="margin: 0.35rem 0 0.85rem;">A scan-out within the lookback counts as scanned; the same alert is never repeated for a person within the suppression window.</small>
+        <div class="setting-row">
+          <label class="label">Alert message template</label>
+          <input v-model="attendanceForm.msg_missed_out" class="input" />
+        </div>
+        <label class="checkbox-label">
+          <input v-model="attendanceForm.voice_alerts" type="checkbox" />
+          Speak attendance alerts aloud on the Live Monitoring page
+        </label>
+      </div>
+    </div>
+
     <!-- ============================ AUTHENTICATION ============================ -->
     <div v-show="activeTab === 'authentication'" class="settings-grid">
       <!-- Local -->
@@ -393,11 +487,13 @@
 <script setup lang="ts">
 const { apiFetch, apiBaseUrl } = useApi()
 const { logoSrc, refresh: refreshAppearance } = useAppearance()
+const { refresh: refreshAttendanceStatus } = useAttendanceStatus()
 
 const tabs = [
   { id: 'general', label: 'General' },
   { id: 'appearance', label: 'Appearance' },
   { id: 'detection', label: 'Detection' },
+  { id: 'attendance', label: 'Attendance' },
   { id: 'authentication', label: 'Authentication' }
 ]
 const activeTab = ref('general')
@@ -433,7 +529,7 @@ const GENERAL_KEYS = [
 const advancedSettings = computed(() =>
   settings.value.filter(s =>
     !s.key.startsWith('appearance.') && !s.key.startsWith('schedule.') && !s.key.startsWith('auth.')
-    && !s.key.startsWith('voice.') && !GENERAL_KEYS.includes(s.key)
+    && !s.key.startsWith('voice.') && !s.key.startsWith('attendance.') && !GENERAL_KEYS.includes(s.key)
   )
 )
 
@@ -460,6 +556,23 @@ const voiceForm = reactive({
 })
 const savingVoice = ref(false)
 const voiceMessage = ref('')
+
+const attendanceForm = reactive({
+  enabled: false,
+  timezone: '',
+  sync_interval_seconds: 30,
+  checkin_window_start: '06:00',
+  checkin_window_end: '12:00',
+  checkin_deadline: '09:00',
+  checkout_time: '17:00',
+  checkout_lookback_minutes: 120,
+  alert_repeat_minutes: 30,
+  voice_alerts: true,
+  msg_missed_in: '',
+  msg_missed_out: ''
+})
+const savingAttendance = ref(false)
+const attendanceMessage = ref('')
 
 const voiceGreeter = useVoiceGreeter()
 const outputDevices = ref<Array<{ deviceId: string, label: string }>>([])
@@ -502,6 +615,19 @@ const load = async () => {
   voiceForm.rate = Number(settingValue('voice.rate', '1'))
   voiceForm.volume = Number(settingValue('voice.volume', '1'))
   voiceForm.voice_name = settingValue('voice.voice_name', '')
+
+  attendanceForm.enabled = parseBool(settingValue('attendance.enabled', 'false'))
+  attendanceForm.timezone = settingValue('attendance.timezone', '')
+  attendanceForm.sync_interval_seconds = Number(settingValue('attendance.sync_interval_seconds', '30'))
+  attendanceForm.checkin_window_start = settingValue('attendance.checkin_window_start', '06:00')
+  attendanceForm.checkin_window_end = settingValue('attendance.checkin_window_end', '12:00')
+  attendanceForm.checkin_deadline = settingValue('attendance.checkin_deadline', '09:00')
+  attendanceForm.checkout_time = settingValue('attendance.checkout_time', '17:00')
+  attendanceForm.checkout_lookback_minutes = Number(settingValue('attendance.checkout_lookback_minutes', '120'))
+  attendanceForm.alert_repeat_minutes = Number(settingValue('attendance.alert_repeat_minutes', '30'))
+  attendanceForm.voice_alerts = parseBool(settingValue('attendance.voice_alerts', 'true'))
+  attendanceForm.msg_missed_in = settingValue('attendance.msg_missed_in', '{name}, you missed scan in. Please scan your fingerprint.')
+  attendanceForm.msg_missed_out = settingValue('attendance.msg_missed_out', '{name}, you are missing scan out. Please scan before leaving.')
 
   providerInfo.value = await apiFetch('/settings/ai-provider').catch(() => ({ reachable: false }))
   const authConfig = await apiFetch('/settings/auth-config').catch(() => null)
@@ -554,6 +680,34 @@ const saveVoice = async () => {
     voiceMessage.value = e?.data?.detail || e.message
   } finally {
     savingVoice.value = false
+  }
+}
+
+const saveAttendance = async () => {
+  savingAttendance.value = true
+  attendanceMessage.value = ''
+  try {
+    await putSetting('attendance.enabled', attendanceForm.enabled)
+    await putSetting('attendance.timezone', attendanceForm.timezone.trim())
+    await putSetting('attendance.sync_interval_seconds', attendanceForm.sync_interval_seconds)
+    await putSetting('attendance.checkin_window_start', attendanceForm.checkin_window_start)
+    await putSetting('attendance.checkin_window_end', attendanceForm.checkin_window_end)
+    await putSetting('attendance.checkin_deadline', attendanceForm.checkin_deadline)
+    await putSetting('attendance.checkout_time', attendanceForm.checkout_time)
+    await putSetting('attendance.checkout_lookback_minutes', attendanceForm.checkout_lookback_minutes)
+    await putSetting('attendance.alert_repeat_minutes', attendanceForm.alert_repeat_minutes)
+    await putSetting('attendance.voice_alerts', attendanceForm.voice_alerts)
+    await putSetting('attendance.msg_missed_in', attendanceForm.msg_missed_in)
+    await putSetting('attendance.msg_missed_out', attendanceForm.msg_missed_out)
+    attendanceMessage.value = attendanceForm.enabled
+      ? 'Attendance mode saved. Fingerprint Management is now available under Operations.'
+      : 'Attendance mode disabled.'
+    refreshAttendanceStatus()
+    await load()
+  } catch (e: any) {
+    attendanceMessage.value = e?.data?.detail || e.message
+  } finally {
+    savingAttendance.value = false
   }
 }
 

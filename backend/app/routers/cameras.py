@@ -122,8 +122,8 @@ async def list_cameras(user=Depends(require_roles("Admin", "Manager", "Operator"
 async def create_camera(payload: CameraCreate, user=Depends(require_roles("Admin", "Manager"))):
     row = await fetchrow(
         """
-        INSERT INTO cameras (name, branch, location, rtsp_url, enabled, ai_enabled, source, onvif_host, onvif_profile_token)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        INSERT INTO cameras (name, branch, location, rtsp_url, enabled, ai_enabled, source, onvif_host, onvif_profile_token, attendance_role)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         RETURNING *
         """,
         payload.name,
@@ -135,6 +135,7 @@ async def create_camera(payload: CameraCreate, user=Depends(require_roles("Admin
         payload.source,
         payload.onvif_host,
         payload.onvif_profile_token,
+        payload.attendance_role,
     )
     await write_audit(user, "camera.create", "camera", str(row["id"]))
     return to_jsonable(row)
@@ -161,8 +162,9 @@ async def update_camera(camera_id: str, payload: CameraUpdate, user=Depends(requ
     row = await fetchrow(
         """
         UPDATE cameras
-        SET name = $1, branch = $2, location = $3, rtsp_url = $4, enabled = $5, ai_enabled = $6, updated_at = now()
-        WHERE id = $7
+        SET name = $1, branch = $2, location = $3, rtsp_url = $4, enabled = $5, ai_enabled = $6,
+            attendance_role = $7, updated_at = now()
+        WHERE id = $8
         RETURNING *
         """,
         merged["name"],
@@ -171,6 +173,7 @@ async def update_camera(camera_id: str, payload: CameraUpdate, user=Depends(requ
         merged["rtsp_url"],
         merged["enabled"],
         merged["ai_enabled"],
+        merged["attendance_role"],
         camera_id,
     )
     if restart_worker and row["enabled"]:

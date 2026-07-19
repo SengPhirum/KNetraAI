@@ -52,6 +52,8 @@ CREATE TABLE IF NOT EXISTS cameras (
     source TEXT NOT NULL DEFAULT 'manual' CHECK (source IN ('manual', 'onvif')),
     onvif_host TEXT,
     onvif_profile_token TEXT,
+    -- Attendance mode: which door this camera watches ('none' = not used for attendance).
+    attendance_role TEXT NOT NULL DEFAULT 'none' CHECK (attendance_role IN ('none', 'entry', 'exit', 'both')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -71,6 +73,11 @@ CREATE TABLE IF NOT EXISTS persons (
     vip_flag BOOLEAN NOT NULL DEFAULT FALSE,
     email TEXT,
     phone TEXT,
+    -- Attendance mode: staff user ID on the fingerprint machine (falls back to staff_id)
+    -- and optional per-staff shift times ("HH:MM") overriding the global settings.
+    fp_user_id TEXT,
+    shift_start TEXT,
+    shift_end TEXT,
     consent_at TIMESTAMPTZ,
     notes TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -130,6 +137,68 @@ CREATE TABLE IF NOT EXISTS greeting_templates (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE(language)
 );
+
+-- ---------------------------------------------------------------------------
+-- Attendance mode (optional): fingerprint devices, punch records, and alerts.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS fp_devices (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name TEXT NOT NULL,
+    -- How punches reach this system:
+    --   'zk'        direct ZKTeco device protocol (host/port/comm key, polled)
+    --   'adms_push' device pushes to this server's /iclock endpoints (matched by serial)
+    --   'biotime'   ZKTeco BioTime/ZKBioTime server REST API (URL + username/password, polled)
+    protocol TEXT NOT NULL DEFAULT 'zk' CHECK (protocol IN ('zk', 'adms_push', 'biotime')),
+    host TEXT NOT NULL DEFAULT '',
+    port INTEGER NOT NULL DEFAULT 4370,
+    comm_key TEXT NOT NULL DEFAULT '0',
+    use_udp BOOLEAN NOT NULL DEFAULT FALSE,
+    api_url TEXT NOT NULL DEFAULT '',
+    api_username TEXT NOT NULL DEFAULT '',
+    api_password TEXT NOT NULL DEFAULT '',
+    branch TEXT,
+    location TEXT,
+    -- Which punches this machine records: 'in' (entry door), 'out' (exit door),
+    -- or 'both' (staff choose check-in/check-out on the device keypad).
+    direction TEXT NOT NULL DEFAULT 'both' CHECK (direction IN ('in', 'out', 'both')),
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    status TEXT NOT NULL DEFAULT 'unknown',
+    device_serial TEXT,
+    last_seen_at TIMESTAMPTZ,
+    last_sync_at TIMESTAMPTZ,
+    last_error TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS attendance_records (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    device_id UUID REFERENCES fp_devices(id) ON DELETE SET NULL,
+    device_user_id TEXT NOT NULL,
+    person_id UUID REFERENCES persons(id) ON DELETE SET NULL,
+    punch_type TEXT NOT NULL DEFAULT 'unknown' CHECK (punch_type IN ('in', 'out', 'unknown')),
+    punched_at TIMESTAMPTZ NOT NULL,
+    raw JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_attendance_records_dedupe
+    ON attendance_records (COALESCE(device_id, '00000000-0000-0000-0000-000000000000'::uuid), device_user_id, punched_at);
+CREATE INDEX IF NOT EXISTS idx_attendance_records_person_time ON attendance_records(person_id, punched_at DESC);
+CREATE INDEX IF NOT EXISTS idx_attendance_records_time ON attendance_records(punched_at DESC);
+
+CREATE TABLE IF NOT EXISTS attendance_alerts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    person_id UUID REFERENCES persons(id) ON DELETE CASCADE,
+    camera_id UUID REFERENCES cameras(id) ON DELETE SET NULL,
+    alert_type TEXT NOT NULL CHECK (alert_type IN ('missed_check_in', 'missed_check_out')),
+    message TEXT NOT NULL,
+    detected_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_attendance_alerts_time ON attendance_alerts(detected_at DESC);
+CREATE INDEX IF NOT EXISTS idx_attendance_alerts_person ON attendance_alerts(person_id, alert_type, detected_at DESC);
 
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
