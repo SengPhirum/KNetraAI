@@ -333,6 +333,55 @@
     </div>
 
     <!-- ============================ AUTHENTICATION ============================ -->
+    <div v-show="activeTab === 'demo'" class="settings-grid">
+      <div class="card">
+        <h2 class="card-title">Dummy Test Data</h2>
+        <p class="section-text">
+          Build a ready-made demo world so the whole AI pipeline can be tested without real CCTV:
+        </p>
+        <ul class="section-text" style="margin: 0 0 0.85rem; padding-left: 1.2rem; display: grid; gap: 0.3rem;">
+          <li><strong>4 dummy people</strong> with enrolled face photos - staff <em>Sokha</em> &amp; <em>Bopha</em> (with fingerprint IDs 9001/9002 and 08:00-17:00 shifts) and customers <em>Visal</em> &amp; <em>Sreyneang</em> (VIP).</li>
+          <li><strong>5 test cameras</strong> playing short looping clips that match those faces, plus one unknown-visitor corridor clip. The staff cameras are pre-marked as attendance Entry/Exit doors.</li>
+        </ul>
+        <p class="section-text">
+          Then open <NuxtLink to="/live">Live Monitoring</NuxtLink>, start a TEST channel, enable AI, and watch
+          recognition, greetings, and (if attendance mode is on) missed scan-in/out alerts fire. All of it is
+          removed again with the Clear button.
+        </p>
+        <div class="btn-row" style="margin-bottom: 0.6rem;">
+          <button class="btn" :disabled="dummyBusy" @click="initDummy">{{ initingDummy ? 'Initializing...' : 'Init dummy data' }}</button>
+          <button class="btn danger" :disabled="dummyBusy" @click="clearDummy">{{ clearingDummy ? 'Clearing...' : 'Clear all dummy data' }}</button>
+        </div>
+        <label class="checkbox-label">
+          <input v-model="clearUploadsToo" type="checkbox" />
+          Also delete uploaded test videos when clearing
+        </label>
+        <p v-if="dummyMessage" class="notice" style="margin-top: 0.75rem;">{{ dummyMessage }}</p>
+        <p v-if="dummyError" class="error" style="margin-top: 0.75rem;">{{ dummyError }}</p>
+        <ul v-if="dummyDetails.length" class="section-text" style="margin: 0.6rem 0 0; padding-left: 1.2rem;">
+          <li v-for="(detail, index) in dummyDetails" :key="index">{{ detail }}</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h2 class="card-title">Current Test Data</h2>
+        <div v-if="dummyStatus" class="status-grid">
+          <div class="status-cell"><strong>{{ dummyStatus.dummy_persons }}</strong><span>Dummy persons</span></div>
+          <div class="status-cell"><strong>{{ dummyStatus.test_cameras }}</strong><span>Test cameras</span></div>
+          <div class="status-cell"><strong>{{ dummyStatus.bundled_videos }}</strong><span>Bundled videos</span></div>
+          <div class="status-cell"><strong>{{ dummyStatus.uploaded_videos }}</strong><span>Uploaded videos</span></div>
+        </div>
+        <p v-else class="section-text">Loading...</p>
+        <button class="btn sm secondary" style="margin-top: 0.75rem;" :disabled="dummyBusy" @click="loadDummyStatus">Refresh</button>
+        <h3 class="subheading">Testing your own videos</h3>
+        <p class="section-text">
+          Managers can also upload any video from the <strong>🎬 Test Videos</strong> button on the Live page -
+          it becomes a looping TEST camera immediately. Uploaded videos are kept on Clear unless the checkbox
+          is ticked.
+        </p>
+      </div>
+    </div>
+
     <div v-show="activeTab === 'authentication'" class="settings-grid">
       <!-- Local -->
       <div class="card">
@@ -494,6 +543,7 @@ const tabs = [
   { id: 'appearance', label: 'Appearance' },
   { id: 'detection', label: 'Detection' },
   { id: 'attendance', label: 'Attendance' },
+  { id: 'demo', label: 'Demo' },
   { id: 'authentication', label: 'Authentication' }
 ]
 const activeTab = ref('general')
@@ -711,6 +761,70 @@ const saveAttendance = async () => {
   }
 }
 
+// ---------------- Maintenance: dummy test data ----------------
+const dummyStatus = ref<any | null>(null)
+const initingDummy = ref(false)
+const clearingDummy = ref(false)
+const clearUploadsToo = ref(false)
+const dummyMessage = ref('')
+const dummyError = ref('')
+const dummyDetails = ref<string[]>([])
+const dummyBusy = computed(() => initingDummy.value || clearingDummy.value)
+
+const loadDummyStatus = async () => {
+  try {
+    dummyStatus.value = await apiFetch('/testing/dummy/status')
+  } catch {
+    dummyStatus.value = null
+  }
+}
+
+const initDummy = async () => {
+  initingDummy.value = true
+  dummyMessage.value = ''
+  dummyError.value = ''
+  dummyDetails.value = []
+  try {
+    const result: any = await apiFetch('/testing/dummy/init', { method: 'POST' })
+    dummyMessage.value = `Done: ${result.persons_created} person(s) and ${result.cameras_created} test camera(s) created (existing ones kept).`
+    dummyDetails.value = (result.details || []).map((detail: any) => {
+      if (detail.person) {
+        const embedding = detail.embedding === 'failed' ? `face enrollment FAILED - ${detail.error}` : `face ${detail.embedding}`
+        return `${detail.person} (${detail.type}): ${detail.created ? 'created' : 'already existed'}, ${embedding}`
+      }
+      if (detail.error) return `${detail.camera}: ${detail.error}`
+      return `${detail.camera}: ${detail.created ? 'camera created' : 'already existed'}`
+    })
+    await loadDummyStatus()
+  } catch (e: any) {
+    dummyError.value = e?.data?.detail || e?.message || 'Init failed'
+  } finally {
+    initingDummy.value = false
+  }
+}
+
+const clearDummy = async () => {
+  const extra = clearUploadsToo.value ? ' Uploaded test videos will be deleted too.' : ''
+  if (!confirm(`Remove all dummy persons, every TEST camera, and their detection/attendance history?${extra}`)) return
+  clearingDummy.value = true
+  dummyMessage.value = ''
+  dummyError.value = ''
+  dummyDetails.value = []
+  try {
+    const result: any = await apiFetch('/testing/dummy/clear', {
+      method: 'POST',
+      body: { include_uploads: clearUploadsToo.value }
+    })
+    dummyMessage.value = `Cleared: ${result.persons_removed} person(s), ${result.cameras_removed} test camera(s), ${result.events_removed} detection event(s)`
+      + (clearUploadsToo.value ? `, ${result.uploads_removed} uploaded video(s).` : '.')
+    await loadDummyStatus()
+  } catch (e: any) {
+    dummyError.value = e?.data?.detail || e?.message || 'Clear failed'
+  } finally {
+    clearingDummy.value = false
+  }
+}
+
 const refreshOutputDevices = async () => {
   outputDevices.value = await voiceGreeter.listOutputDevices()
   sinkSupported.value = voiceGreeter.sinkRoutingSupported()
@@ -827,6 +941,7 @@ const saveAuth = async (section: 'local' | 'oidc' | 'ldap') => {
 
 onMounted(() => {
   load()
+  loadDummyStatus()
   loadBrowserVoices()
   refreshOutputDevices().catch(() => {})
   if (import.meta.client && navigator.mediaDevices?.addEventListener) {
@@ -836,6 +951,30 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 0.6rem;
+}
+
+.status-cell {
+  display: grid;
+  gap: 0.15rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+  text-align: center;
+}
+
+.status-cell strong {
+  font-size: 1.3rem;
+}
+
+.status-cell span {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
 .tabs {
   display: flex;
   flex-wrap: wrap;

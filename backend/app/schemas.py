@@ -47,7 +47,7 @@ class CameraCreate(BaseModel):
     rtsp_url: str
     enabled: bool = True
     ai_enabled: bool = False
-    source: Literal["manual", "onvif"] = "manual"
+    source: Literal["manual", "onvif", "test"] = "manual"
     onvif_host: str | None = None
     onvif_profile_token: str | None = None
     attendance_role: Literal["none", "entry", "exit", "both"] = "none"
@@ -287,6 +287,17 @@ class AttendancePushRequest(BaseModel):
 
 class AttendanceAlertsClearRequest(BaseModel):
     alert_ids: list[str] | None = None  # None/empty = clear everything
+
+
+class TestVideoCameraRequest(BaseModel):
+    kind: Literal["bundled", "uploaded"]
+    file: str
+    name: str | None = None
+    autostart: bool = True
+
+
+class DummyClearRequest(BaseModel):
+    include_uploads: bool = False
 
 
 class SettingUpdate(BaseModel):

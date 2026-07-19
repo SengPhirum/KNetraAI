@@ -329,6 +329,9 @@ def _encode_thumbnail(frame, max_width: int, quality: int) -> str | None:
 
 
 def _test_stream_sync(rtsp_url: str, timeout_ms: int) -> dict[str, Any]:
+    # Test cameras use local video files as their source (file:///data/...).
+    if rtsp_url.startswith("file://"):
+        rtsp_url = rtsp_url[7:]
     # Timeouts must be passed at open time (via the params overload) - setting them
     # on the VideoCapture object after construction is too late, since the connection
     # attempt already happened synchronously inside the constructor.

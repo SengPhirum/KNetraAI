@@ -21,6 +21,10 @@ async def run_migrations() -> None:
     await execute("ALTER TABLE persons ADD COLUMN IF NOT EXISTS shift_start TEXT")
     await execute("ALTER TABLE persons ADD COLUMN IF NOT EXISTS shift_end TEXT")
     await execute("ALTER TABLE cameras ADD COLUMN IF NOT EXISTS attendance_role TEXT NOT NULL DEFAULT 'none'")
+    await execute("ALTER TABLE persons ADD COLUMN IF NOT EXISTS is_dummy BOOLEAN NOT NULL DEFAULT FALSE")
+    # 'test' source = camera playing a looped local video file (Settings > Demo / Live > Test Videos).
+    await execute("ALTER TABLE cameras DROP CONSTRAINT IF EXISTS cameras_source_check")
+    await execute("ALTER TABLE cameras ADD CONSTRAINT cameras_source_check CHECK (source IN ('manual', 'onvif', 'test'))")
     await execute(
         """
         CREATE TABLE IF NOT EXISTS fp_devices (

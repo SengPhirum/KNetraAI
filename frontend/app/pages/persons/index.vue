@@ -169,6 +169,7 @@
             <td style="font-weight: 600;">
               {{ person.full_name }}
               <span v-if="person.vip_flag" class="badge warning" style="margin-left: 0.3rem;">VIP</span>
+              <span v-if="person.is_dummy" class="badge info" style="margin-left: 0.3rem;" title="Dummy test data from Settings > Demo">DUMMY</span>
             </td>
             <td><span class="badge" :class="person.person_type === 'staff' ? 'info' : 'success'">{{ person.person_type }}</span></td>
             <td>{{ person.staff_id || person.customer_id || '-' }}</td>

@@ -59,8 +59,15 @@ async def embedding_from_path(payload: EmbeddingFromPathRequest):
 @app.post("/cameras/start", dependencies=[Depends(verify_internal_key)])
 async def start_camera(payload: CameraStartRequest):
     existing = workers.get(payload.id)
-    if existing and existing.running and existing.camera.model_dump() == payload.model_dump():
-        return existing.info()
+    if existing and existing.running:
+        current = existing.camera.model_dump()
+        incoming = payload.model_dump()
+        # ai_enabled has its own toggle endpoint and must not force a rebuild here:
+        # recreating the worker resets presence sessions and re-greets everyone in view.
+        if {k: v for k, v in current.items() if k != "ai_enabled"} == {k: v for k, v in incoming.items() if k != "ai_enabled"}:
+            if current["ai_enabled"] != incoming["ai_enabled"]:
+                existing.set_ai_enabled(bool(incoming["ai_enabled"]))
+            return existing.info()
     if existing:
         await existing.stop()
         workers.pop(payload.id, None)

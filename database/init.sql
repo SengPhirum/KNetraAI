@@ -49,7 +49,7 @@ CREATE TABLE IF NOT EXISTS cameras (
     ai_enabled BOOLEAN NOT NULL DEFAULT FALSE,
     status TEXT NOT NULL DEFAULT 'stopped',
     last_seen_at TIMESTAMPTZ,
-    source TEXT NOT NULL DEFAULT 'manual' CHECK (source IN ('manual', 'onvif')),
+    source TEXT NOT NULL DEFAULT 'manual' CHECK (source IN ('manual', 'onvif', 'test')),
     onvif_host TEXT,
     onvif_profile_token TEXT,
     -- Attendance mode: which door this camera watches ('none' = not used for attendance).
@@ -80,6 +80,9 @@ CREATE TABLE IF NOT EXISTS persons (
     shift_end TEXT,
     consent_at TIMESTAMPTZ,
     notes TEXT,
+    -- Dummy demo rows created by Settings > Maintenance "Init dummy data"; the
+    -- matching Clear button deletes everything flagged here.
+    is_dummy BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );

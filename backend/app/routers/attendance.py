@@ -15,7 +15,7 @@ import asyncio
 import json
 import logging
 import re
-from datetime import datetime, timedelta, tzinfo
+from datetime import date, datetime, timedelta, tzinfo
 from typing import Any, Awaitable, Callable
 from zoneinfo import ZoneInfo
 
@@ -792,6 +792,15 @@ async def iclock_receive(request: Request, SN: str = "", table: str = ""):
     return f"OK: {inserted}"
 
 
+def _parse_date_param(value: str) -> date:
+    """asyncpg binds ``$n::date`` parameters as real dates - a raw query string
+    fails to encode, so parse (and validate) the filter here."""
+    try:
+        return date.fromisoformat(value.strip())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid date filter (use YYYY-MM-DD)") from exc
+
+
 @router.get("/attendance/records")
 async def list_attendance_records(
     limit: int = Query(default=100, ge=1, le=1000),
@@ -819,9 +828,9 @@ async def list_attendance_records(
     if punch_type in ("in", "out", "unknown"):
         add_clause("ar.punch_type = {}", punch_type)
     if date_from:
-        add_clause("ar.punched_at >= {}::date", date_from)
+        add_clause("ar.punched_at >= {}::date", _parse_date_param(date_from))
     if date_to:
-        add_clause("ar.punched_at < ({}::date + interval '1 day')", date_to)
+        add_clause("ar.punched_at < ({}::date + interval '1 day')", _parse_date_param(date_to))
     if matched is True:
         clauses.append("ar.person_id IS NOT NULL")
     elif matched is False:
@@ -888,9 +897,9 @@ async def list_attendance_alerts(
     if alert_type in ("missed_check_in", "missed_check_out"):
         add_clause("aa.alert_type = {}", alert_type)
     if date_from:
-        add_clause("aa.detected_at >= {}::date", date_from)
+        add_clause("aa.detected_at >= {}::date", _parse_date_param(date_from))
     if date_to:
-        add_clause("aa.detected_at < ({}::date + interval '1 day')", date_to)
+        add_clause("aa.detected_at < ({}::date + interval '1 day')", _parse_date_param(date_to))
     where = "WHERE " + " AND ".join(clauses) if clauses else ""
     values.append(limit)
     rows = await fetch(

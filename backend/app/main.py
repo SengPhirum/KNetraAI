@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .config import settings
 from .db import close_db, connect_db
-from .routers import attendance, audit_logs, auth, cameras, detections, persons, settings as settings_router, users
+from .routers import attendance, audit_logs, auth, cameras, detections, persons, settings as settings_router, testing, users
 from .seed import seed_data
 
 logger = logging.getLogger(__name__)
@@ -54,6 +54,12 @@ async def startup() -> None:
     Path(settings.storage_dir).mkdir(parents=True, exist_ok=True)
     await connect_db()
     await seed_data()
+    try:
+        copied = testing.sync_bundled_assets()
+        if copied:
+            logger.info("Synced %d bundled test video(s) into storage", copied)
+    except OSError as exc:
+        logger.warning("Could not sync bundled test videos: %s", exc)
     _retention_task = asyncio.create_task(_retention_loop(), name="retention-cleanup")
     _attendance_task = asyncio.create_task(_attendance_loop(), name="attendance-sync")
 
@@ -80,6 +86,7 @@ app.include_router(detections.router)
 app.include_router(settings_router.router)
 app.include_router(audit_logs.router)
 app.include_router(attendance.router)
+app.include_router(testing.router)
 
 # MVP local file serving. For production, place files behind private storage or signed URLs.
 app.mount("/files", StaticFiles(directory=settings.storage_dir), name="files")

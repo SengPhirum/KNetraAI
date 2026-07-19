@@ -1,0 +1,101 @@
+{
+  "license": "Bundled clips are license-verified free stock footage: office-corridor clips from Pexels (Pexels License - free for commercial use, no attribution) and elevator/lobby clips from Mixkit under the Mixkit Stock Video Free License (commercial use allowed). Face photos are frames extracted from those same clips. All people shown are stock-footage actors used purely as demo/test data.",
+  "persons": [
+    {
+      "key": "sokha-demo",
+      "full_name": "Sokha Demo",
+      "person_type": "staff",
+      "gender": "male",
+      "photo": "faces/sokha-demo.jpg",
+      "staff_id": "DEMO-001",
+      "department": "Demo",
+      "position": "Test Staff",
+      "fp_user_id": "9001",
+      "shift_start": "08:00",
+      "shift_end": "17:00",
+      "notes": "Dummy test data - auto-created from Settings > Demo. Matches the 'Staff walk-in - Sokha' test video."
+    },
+    {
+      "key": "bopha-demo",
+      "full_name": "Bopha Demo",
+      "person_type": "staff",
+      "gender": "female",
+      "photo": "faces/bopha-demo.jpg",
+      "staff_id": "DEMO-002",
+      "department": "Demo",
+      "position": "Test Staff",
+      "fp_user_id": "9002",
+      "shift_start": "08:00",
+      "shift_end": "17:00",
+      "notes": "Dummy test data - auto-created from Settings > Demo. Matches the 'Staff walk-out - Bopha' test video."
+    },
+    {
+      "key": "visal-demo",
+      "full_name": "Visal Demo",
+      "person_type": "customer",
+      "gender": "male",
+      "photo": "faces/visal-demo.jpg",
+      "customer_id": "DEMO-C01",
+      "customer_type": "regular",
+      "notes": "Dummy test data - auto-created from Settings > Demo. Matches the 'Customer at the elevator - Visal' test video."
+    },
+    {
+      "key": "sreyneang-demo",
+      "full_name": "Sreyneang Demo",
+      "person_type": "customer",
+      "gender": "female",
+      "photo": "faces/sreyneang-demo.jpg",
+      "customer_id": "DEMO-C02",
+      "customer_type": "vip",
+      "vip_flag": true,
+      "notes": "Dummy test data - auto-created from Settings > Demo. Matches the 'VIP customer from the elevator - Sreyneang' test video."
+    }
+  ],
+  "videos": [
+    {
+      "file": "staff-sokha.mp4",
+      "label": "Staff walk-in - Sokha (office corridor)",
+      "description": "Registered dummy staff. A man walks along the office corridor straight toward the camera - like an entry-door channel. Also marked as an attendance Entry door.",
+      "camera_name": "TEST Entry - Staff Sokha",
+      "attendance_role": "entry",
+      "person": "sokha-demo",
+      "source": "Pexels video 5981597 (cottonbro studio)"
+    },
+    {
+      "file": "staff-bopha.mp4",
+      "label": "Staff walk-out - Bopha (office corridor)",
+      "description": "Registered dummy staff. A staff woman carrying paperwork walks down the glass-walled office corridor toward the camera - used as the attendance Exit door.",
+      "camera_name": "TEST Exit - Staff Bopha",
+      "attendance_role": "exit",
+      "person": "bopha-demo",
+      "source": "Pexels video 7651683"
+    },
+    {
+      "file": "customer-visal.mp4",
+      "label": "Customer at the elevator - Visal",
+      "description": "Registered dummy customer. A man walks through the office to the elevator, face close to the camera - like a channel watching the elevator door.",
+      "camera_name": "TEST - Customer Visal",
+      "attendance_role": "none",
+      "person": "visal-demo",
+      "source": "Mixkit clip 39809 (Free License)"
+    },
+    {
+      "file": "customer-sreyneang.mp4",
+      "label": "VIP customer from the elevator - Sreyneang",
+      "description": "Registered dummy VIP customer. A woman steps out of the elevator and walks through the lobby toward the camera, another visitor in the background.",
+      "camera_name": "TEST - VIP Sreyneang",
+      "attendance_role": "none",
+      "person": "sreyneang-demo",
+      "source": "Mixkit clip 256 (Free License)"
+    },
+    {
+      "file": "office-unknown.mp4",
+      "label": "Unknown visitor - office hallway (male)",
+      "description": "NOT registered. A man walks the same office hallway toward the camera. Tests the unknown-visitor flow: gender voting and the Hello sir greeting.",
+      "camera_name": "TEST - Unknown Visitor",
+      "attendance_role": "none",
+      "person": null,
+      "source": "Pexels video 7651686"
+    }
+  ]
+}

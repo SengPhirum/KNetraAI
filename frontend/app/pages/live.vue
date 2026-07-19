@@ -27,6 +27,13 @@
         <div class="btn-row" v-if="!focusedCamera">
           <button v-for="opt in layoutOptions" :key="opt" class="btn sm secondary" :class="{ active: layout === opt }" @click="setLayout(opt)">{{ opt }}-up</button>
           <button class="btn sm" type="button" @click="showPicker = true">+ Add Camera</button>
+          <button
+            v-if="canManage"
+            class="btn sm secondary"
+            type="button"
+            title="Play a video file as a looping test camera - no real CCTV needed"
+            @click="showTestVideos = true"
+          >🎬 Test Videos</button>
         </div>
       </div>
 
@@ -44,6 +51,7 @@
           <div class="btn-row" style="margin-bottom: 0.6rem;">
             <button class="btn sm secondary" type="button" @click="focusedCameraId = null">&larr; Back to grid</button>
             <strong style="align-self: center; margin-left: 0.4rem;">{{ focusedCamera.name }}</strong>
+            <span v-if="focusedCamera.source === 'test'" class="badge warning" title="Test camera playing a looped video file">TEST</span>
             <span class="badge dot" :class="statusClass(focusedCamera.status)">{{ focusedCamera.status }}</span>
             <span class="badge dot" :class="focusedCamera.ai_enabled ? 'success' : ''">{{ focusedCamera.ai_enabled ? 'AI on' : 'AI off' }}</span>
           </div>
@@ -84,6 +92,7 @@
                 <span class="drag-handle" title="Drag to rearrange">⠿</span>
                 <strong class="truncate" :title="camera.name">{{ camera.name }}</strong>
                 <div class="btn-row tile-badges">
+                  <span v-if="camera.source === 'test'" class="badge warning" title="Test camera playing a looped video file">TEST</span>
                   <span class="badge dot" :class="statusClass(camera.status)">{{ camera.status }}</span>
                   <span class="badge dot" :class="camera.ai_enabled ? 'success' : ''">{{ camera.ai_enabled ? 'AI on' : 'AI off' }}</span>
                   <button
@@ -202,12 +211,17 @@
       @add="addToView"
       @remove="hideFromView"
     />
+    <TestVideoModal
+      :show="showTestVideos"
+      @close="showTestVideos = false"
+      @added="onTestCameraAdded"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 const { apiFetch, apiBaseUrl, token } = useApi()
-const { isAdmin, canOperate } = useCurrentUser()
+const { isAdmin, canManage, canOperate } = useCurrentUser()
 const { attendanceEnabled, attendanceVoiceAlerts, refresh: refreshAttendanceStatus } = useAttendanceStatus()
 const voiceGreeter = useVoiceGreeter()
 
@@ -236,6 +250,14 @@ const cameraOrder = ref<string[]>(import.meta.client ? JSON.parse(localStorage.g
 const persistOrder = () => { if (import.meta.client) localStorage.setItem(ORDER_KEY, JSON.stringify(cameraOrder.value)) }
 
 const showPicker = ref(false)
+const showTestVideos = ref(false)
+
+// A test camera was created (and usually auto-started) from the Test Videos
+// modal: make sure its tile is visible and pull fresh camera state.
+const onTestCameraAdded = (camera: any) => {
+  addToView(camera)
+  void load()
+}
 
 const voiceSettings = ref<ReturnType<typeof voiceSettingsFromList>>({
   enabled: false, greetKnown: true, greetUnknown: true, repeatSeconds: 60, rate: 1, volume: 1, voiceName: ''

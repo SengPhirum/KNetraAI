@@ -5,7 +5,7 @@ import logging
 import threading
 from datetime import datetime
 from pathlib import Path
-from time import monotonic
+from time import monotonic, sleep
 from typing import Any
 from uuid import uuid4
 
@@ -42,7 +42,16 @@ class _LatestFrameReader:
     """
 
     def __init__(self, rtsp_url: str) -> None:
-        self._cap = cv2.VideoCapture(rtsp_url)
+        # Video files (test cameras) are played back like a live source: paced to
+        # the file's native FPS and looped at EOF so a short clip acts like an
+        # endless camera feed.
+        self._is_file = rtsp_url.startswith("file://") or rtsp_url.startswith("/")
+        source = rtsp_url[7:] if rtsp_url.startswith("file://") else rtsp_url
+        self._cap = cv2.VideoCapture(source)
+        self._frame_interval = 0.0
+        if self._is_file:
+            fps = self._cap.get(cv2.CAP_PROP_FPS)
+            self._frame_interval = 1.0 / fps if fps and fps > 0 else 1.0 / 25.0
         try:
             self._cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         except Exception:
@@ -62,15 +71,25 @@ class _LatestFrameReader:
 
     def _loop(self) -> None:
         while self._running:
+            started = monotonic()
             ok, frame = self._cap.read()
             if not ok or frame is None:
-                with self._lock:
-                    self._error = "Camera frame read failed"
-                    self._running = False
-                return
+                if self._is_file:
+                    # End of clip (or transient decode hiccup): rewind and keep looping.
+                    self._cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                    ok, frame = self._cap.read()
+                if not ok or frame is None:
+                    with self._lock:
+                        self._error = "Camera frame read failed"
+                        self._running = False
+                    return
             with self._lock:
                 self._frame = frame
                 self._frame_id += 1
+            if self._is_file:
+                delay = self._frame_interval - (monotonic() - started)
+                if delay > 0:
+                    sleep(delay)
 
     def latest(self) -> tuple[int, np.ndarray | None, str | None]:
         with self._lock:

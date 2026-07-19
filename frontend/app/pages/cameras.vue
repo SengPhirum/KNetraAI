@@ -234,7 +234,10 @@
                 <div>{{ camera.branch || '-' }}</div>
                 <div class="muted-cell">{{ camera.location || '-' }}</div>
               </td>
-              <td><span class="badge" :class="camera.source === 'onvif' ? 'info' : ''">{{ camera.source === 'onvif' ? 'ONVIF' : 'Manual' }}</span></td>
+              <td>
+                <span v-if="camera.source === 'test'" class="badge warning" title="Test camera playing a looped video file">TEST</span>
+                <span v-else class="badge" :class="camera.source === 'onvif' ? 'info' : ''">{{ camera.source === 'onvif' ? 'ONVIF' : 'Manual' }}</span>
+              </td>
               <td><span class="badge dot" :class="camera.enabled ? 'success' : ''">{{ camera.enabled ? 'Active' : 'Disabled' }}</span></td>
               <td><span class="badge dot" :class="statusClass(camera.status)">{{ statusLabel(camera.status) }}</span></td>
               <td>
@@ -273,7 +276,7 @@
                 @change="toggleSelect(camera.id)"
               />
               <div>
-                <h3>{{ camera.name }}</h3>
+                <h3>{{ camera.name }} <span v-if="camera.source === 'test'" class="badge warning">TEST</span></h3>
                 <p>{{ [camera.branch, camera.location].filter(Boolean).join(' - ') || 'No site set' }}</p>
               </div>
             </label>
